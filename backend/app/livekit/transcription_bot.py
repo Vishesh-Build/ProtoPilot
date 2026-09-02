@@ -185,10 +185,18 @@ async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_b
     )
 
     logger.info(
-        "meeting %s: %.2fs of audio -> caption in %.2fs (queue_wait=%.2fs whisper=%.2fs); "
-        "translation follows asynchronously",
-        meeting_id, utterance_seconds, time.monotonic() - t_queued, wait_time, whisper_time,
+        "meeting %s: %s | %.2fs audio -> caption in %.2fs (queue_wait=%.2fs whisper=%.2fs) "
+        "| lang=%s conf=%.2f | text=%r",
+        meeting_id, speaker_name, utterance_seconds, time.monotonic() - t_queued,
+        wait_time, whisper_time, result.language, result.language_probability, result.text,
     )
+    if result.language_probability < 0.6:
+        # Low confidence on a short utterance is the usual reason a Gujarati
+        # line comes back as Hindi (or vice versa) and reads like nonsense.
+        logger.warning(
+            "meeting %s: low language confidence (%s @ %.2f) on %.2fs of audio from %s",
+            meeting_id, result.language, result.language_probability, utterance_seconds, speaker_name,
+        )
 
     await meeting_connections.broadcast(meeting_id, {
         "type": "transcript",

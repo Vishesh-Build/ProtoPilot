@@ -1,0 +1,8 @@
+# Audio clips are large and OneDrive-synced — keep them out of git.
+# Only README.md and reference.csv (the answer key) are tracked.
+clips/
+*.wav
+*.m4a
+*.mp3
+*.ogg
+*.flac

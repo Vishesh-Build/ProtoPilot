@@ -1,4 +1,6 @@
 import logging
+import logging.handlers
+import pathlib
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +9,13 @@ from app.api import auth, exports, health, livekit_router, llm_test, meetings, o
 from app.db.database import init_models
 from app.ws import generate, meeting
 
-logging.basicConfig(level=logging.INFO)
+# Logs go to the terminal as before AND to backend/protopilot.log, so a
+# transcription problem can be looked at after the meeting instead of only
+# while it scrolls past. Rotates at 5 MB, keeps 3 files; gitignored (*.log).
+_LOG_FILE = pathlib.Path(__file__).resolve().parent.parent / "protopilot.log"
+_file_handler = logging.handlers.RotatingFileHandler(_LOG_FILE, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+_file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(), _file_handler])
 
 app = FastAPI(title="ProtoPilot Backend", version="0.2.0")
 
