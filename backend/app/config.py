@@ -133,14 +133,20 @@ class Settings(BaseSettings):
     # How long (seconds) of silence ends a participant's utterance and sends
     # it to Whisper. Too short = sentences get cut mid-thought; too long =
     # noticeable transcript lag. Tune by ear once it's running.
-    vad_silence_timeout_seconds: float = 0.7
+    # 0.55 is roughly the shortest that still survives the natural pauses in
+    # Hindi/Gujarati speech; below ~0.45 clauses start getting chopped into
+    # fragments and ASR accuracy drops with them.
+    vad_silence_timeout_seconds: float = 0.55
     # 0 (least aggressive) to 3 (most aggressive) — how strictly webrtcvad
     # treats audio as speech vs. non-speech.
     vad_aggressiveness: int = 2
-    # How many participant utterances can be transcribed by Whisper at once,
-    # across ALL active meetings — keeps a burst of simultaneous speakers
-    # from saturating the CPU; extras queue instead of piling on at once.
-    max_concurrent_transcriptions: int = 2
+    # How many participant utterances can be transcribed at once, across ALL
+    # active meetings — keeps a burst of simultaneous speakers from saturating
+    # the machine; extras queue instead of piling on at once.
+    # At 2, a 3-4 person meeting spent real time just waiting for a slot, and
+    # that wait is invisible in the logs because it happens before Whisper is
+    # even called. Raise further only if the box can take it.
+    max_concurrent_transcriptions: int = 4
 
 
 settings = Settings()

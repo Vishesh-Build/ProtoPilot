@@ -18,10 +18,40 @@ from dataclasses import dataclass, field
 
 @dataclass
 class TranscriptLine:
+    """
+    One utterance. `id` exists so the line can be shown immediately and
+    patched later: translation is a network call, and a caption must never
+    wait on the network to appear on screen.
+    """
+
+    id: int
     speaker: str
     language: str
     original_text: str
-    english_text: str
+    # None means "translation still in flight". Readers should use
+    # display_text(), which falls back to the original.
+    english_text: str | None = None
+    # When the audio finished, captured before transcription starts.
+    # Utterances are transcribed concurrently and therefore finish out of
+    # order, so this — not arrival order — is the real chronology.
+    spoken_at: str = field(default_factory=lambda: datetime.datetime.utcnow().isoformat() + "Z")
+    # Set only on the lines actually handed to the requirement extractor.
+    # A per-line flag rather than a shared index is what makes overlapping
+    # extractions safe (see requirements/extractor.py).
+    extracted: bool = False
+
+    def display_text(self) -> str:
+        return self.english_text or self.original_text
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "speaker": self.speaker,
+            "language": self.language,
+            "original_text": self.original_text,
+            "english_text": self.english_text,
+            "spoken_at": self.spoken_at,
+        }
 
 
 @dataclass
@@ -49,22 +79,64 @@ class MeetingSession:
 
     transcript: list[TranscriptLine] = field(default_factory=list)
     requirements: list[Requirement] = field(default_factory=list)
-    # Index into `transcript` marking what's already been sent to the
-    # requirement extractor — so re-extraction only looks at new lines.
-    last_extracted_index: int = 0
     # Filled in after the agent pipeline runs — agent_id -> its output text.
     agent_outputs: dict = field(default_factory=dict)
 
     _id_counter: "itertools.count" = field(default_factory=lambda: itertools.count(1))
+    _line_counter: "itertools.count" = field(default_factory=lambda: itertools.count(1))
 
-    def add_transcript_line(self, speaker: str, language: str, original_text: str, english_text: str):
-        self.transcript.append(TranscriptLine(speaker, language, original_text, english_text))
+    def add_transcript_line(
+        self,
+        speaker: str,
+        language: str,
+        original_text: str,
+        english_text: str | None = None,
+        spoken_at: str | None = None,
+    ) -> TranscriptLine:
+        """
+        Adds a line and returns it, so the caller can broadcast it now and
+        patch in the translation later via set_translation(line.id, ...).
 
-    def new_transcript_since_last_extraction(self) -> list[TranscriptLine]:
-        return self.transcript[self.last_extracted_index:]
+        Inserted at its chronological position rather than appended: two
+        participants' utterances are transcribed concurrently, so a longer
+        one can finish after a shorter one that was spoken later.
+        """
+        line = TranscriptLine(
+            id=next(self._line_counter),
+            speaker=speaker,
+            language=language,
+            original_text=original_text,
+            english_text=english_text,
+            **({"spoken_at": spoken_at} if spoken_at else {}),
+        )
+        index = len(self.transcript)
+        while index > 0 and self.transcript[index - 1].spoken_at > line.spoken_at:
+            index -= 1
+        self.transcript.insert(index, line)
+        return line
 
-    def mark_extracted_up_to_current(self):
-        self.last_extracted_index = len(self.transcript)
+    def set_translation(self, line_id: int, english_text: str) -> TranscriptLine | None:
+        """Fills in a translation that arrived after the line was shown."""
+        for line in self.transcript:
+            if line.id == line_id:
+                line.english_text = english_text
+                return line
+        return None
+
+    def pending_extraction_lines(self) -> list[TranscriptLine]:
+        """Lines never handed to the requirement extractor."""
+        return [line for line in self.transcript if not line.extracted]
+
+    def mark_extracted(self, line_ids: list[int] | set[int]):
+        """
+        Marks exactly the lines that were sent to the extractor. Anything
+        that arrived mid-call stays pending and is picked up next round —
+        this is why requirements can't be silently dropped.
+        """
+        wanted = set(line_ids)
+        for line in self.transcript:
+            if line.id in wanted:
+                line.extracted = True
 
     def add_requirements(self, new_reqs: list[dict]) -> list[Requirement]:
         """
@@ -134,7 +206,9 @@ class MeetingSession:
             "transcript_lines": len(self.transcript),
             "requirement_count": len(self.requirements),
             "readiness_percent": self.readiness_percent(),
-            "has_prototype": bool(self.agent_outputs),
+            # Only the prototype agent produces a prototype. Checking the
+            # whole dict counted a PM-only run as "prototype ready".
+            "has_prototype": bool(self.agent_outputs.get("prototype")),
         }
 
 

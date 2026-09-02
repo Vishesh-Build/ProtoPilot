@@ -213,6 +213,12 @@ const styles = `
   @keyframes lmcAudioLevel { 0%,100% { transform: scaleY(0.3); opacity:0.5; } 50% { transform: scaleY(1); opacity:1; } }
   .lmc-caption-text-wrap { flex: 1; min-width: 0; }
   .lmc-caption-label { font-size: 10px; font-weight: 700; color: #8A8FA3; letter-spacing: 0.03em; margin-bottom: 2px; }
+  .lmc-caption-pending { margin-left: 6px; font-weight: 600; color: #6FE6C4; opacity: 0.75; text-transform: none; letter-spacing: 0; }
+  .lmc-caption-failed { margin-left: 6px; font-weight: 700; color: #FF8A7A; text-transform: none; letter-spacing: 0; }
+  @media (prefers-reduced-motion: no-preference) {
+    .lmc-caption-pending { animation: lmc-caption-pulse 1.4s ease-in-out infinite; }
+  }
+  @keyframes lmc-caption-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.9; } }
   .lmc-caption-text { font-size: 12.5px; color: #F4F4F6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lmc-caption-gear { color: #9A9EB0; cursor: pointer; flex-shrink: 0; transition: color 0.15s ease; }
   .lmc-caption-gear:hover { color: #F4F4F6; }
@@ -389,10 +395,25 @@ export default function LiveMeetingCall({
   const [cameraOn, setCameraOn] = useState(false);
   const [screenShareOn, setScreenShareOn] = useState(false);
 
-  const [captionText, setCaptionText] = useState("Waiting for someone to speak…");
+  // The caption is shown the moment Whisper returns, carrying the original
+  // text. Its translation arrives separately as a transcript_update, so the
+  // line id has to be tracked to know which caption an update belongs to.
+  const [caption, setCaption] = useState({
+    lineId: null,
+    speaker: "",
+    text: "Waiting for someone to speak…",
+    pending: false,
+  });
   const [chatMessages, setChatMessages] = useState([]);
   const [elapsedText, setElapsedText] = useState("00:00:00");
   const [idCopied, setIdCopied] = useState(false);
+
+  // The transcript feed is a separate connection from the LiveKit room, so it
+  // can die while audio and video stay perfectly fine. Silent captions then
+  // look exactly like "transcription is broken", which is why this is tracked
+  // and shown: live | reconnecting | failed.
+  const [feedState, setFeedState] = useState("live");
+  const [feedError, setFeedError] = useState("");
 
   const roomRef = useRef(null);
   const socketRef = useRef(null);
@@ -558,28 +579,85 @@ export default function LiveMeetingCall({
   useEffect(() => {
     if (!meetingId || connectionState !== "connected") return undefined;
 
-    const socket = new WebSocket(meetingsApi.transcriptSocketUrl(meetingId));
-    socketRef.current = socket;
+    // Auth failures and a missing session are permanent — retrying those just
+    // hides the real reason. Anything else (network blip, backend restart) is
+    // worth reconnecting for, with backoff so a down backend isn't hammered.
+    const PERMANENT_CLOSE_CODES = { 4401: "Session expired — sign in again to see captions.", 4404: "This meeting is no longer active on the server." };
+    const MAX_RETRY_DELAY_MS = 10000;
 
-    socket.onmessage = (event) => {
-      let data;
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        return;
-      }
+    let closedByUs = false;
+    let retryTimer = null;
+    let attempt = 0;
 
-      if (data.type === "transcript") {
-        setCaptionText(`${data.speaker}: ${data.english_text}`);
-      } else if (data.type === "requirements" && Array.isArray(data.new)) {
-        setPoints((prev) => [
-          ...prev,
-          ...data.new.map((r) => ({ id: r.id, text: r.title, status: r.status })),
-        ]);
-      }
+    const connect = () => {
+      const socket = new WebSocket(meetingsApi.transcriptSocketUrl(meetingId));
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        attempt = 0;
+        setFeedState("live");
+        setFeedError("");
+      };
+
+      socket.onmessage = (event) => {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (data.type === "transcript") {
+          setCaption({
+            lineId: data.line_id,
+            speaker: data.speaker,
+            text: data.english_text,
+            pending: Boolean(data.translation_pending),
+          });
+        } else if (data.type === "transcript_update") {
+          // Patch only if this line is still the one on screen — a newer
+          // utterance may already have replaced it, and a late translation
+          // must not bring the older line back.
+          setCaption((prev) =>
+            prev.lineId === data.line_id
+              ? { ...prev, text: data.english_text, pending: false }
+              : prev,
+          );
+        } else if (data.type === "requirements" && Array.isArray(data.new)) {
+          setPoints((prev) => [
+            ...prev,
+            ...data.new.map((r) => ({ id: r.id, text: r.title, status: r.status })),
+          ]);
+        } else if (data.type === "error") {
+          setFeedState("failed");
+          setFeedError(data.message || "Transcript feed error.");
+        }
+      };
+
+      socket.onclose = (event) => {
+        if (closedByUs) return;
+
+        const permanent = PERMANENT_CLOSE_CODES[event.code];
+        if (permanent) {
+          setFeedState("failed");
+          setFeedError(permanent);
+          return;
+        }
+
+        attempt += 1;
+        setFeedState("reconnecting");
+        setFeedError("");
+        retryTimer = setTimeout(connect, Math.min(1000 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS));
+      };
     };
 
-    return () => socket.close();
+    connect();
+
+    return () => {
+      closedByUs = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (socketRef.current) socketRef.current.close();
+    };
   }, [meetingId, connectionState]);
 
   // Initial requirements load (in case some were already captured before this client connected).
@@ -813,8 +891,19 @@ export default function LiveMeetingCall({
                     ))}
                   </div>
                   <div className="lmc-caption-text-wrap">
-                    <div className="lmc-caption-label">LIVE TRANSCRIPT</div>
-                    <div className="lmc-caption-text">{captionText}</div>
+                    <div className="lmc-caption-label">
+                      LIVE TRANSCRIPT
+                      {feedState === "live" && caption.pending && <span className="lmc-caption-pending">translating…</span>}
+                      {feedState === "reconnecting" && <span className="lmc-caption-pending">reconnecting…</span>}
+                      {feedState === "failed" && <span className="lmc-caption-failed">disconnected</span>}
+                    </div>
+                    <div className="lmc-caption-text">
+                      {feedState === "failed"
+                        ? feedError
+                        : caption.speaker
+                          ? `${caption.speaker}: ${caption.text}`
+                          : caption.text}
+                    </div>
                   </div>
                   <Settings size={15} className="lmc-caption-gear" />
                 </div>

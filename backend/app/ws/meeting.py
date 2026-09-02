@@ -10,15 +10,26 @@ what every participant's Electron app connects to in order to *receive*
 those live updates — transcript lines, new requirements, errors.
 
   Server -> Client (broadcast to every connected participant):
-    - {"type": "transcript", "speaker": "<participant name>",
+    - {"type": "transcript", "line_id": 12, "speaker": "<participant name>",
        "language": "hi", "language_confidence": 0.94,
-       "original_text": "...", "english_text": "...", "timestamp": "..."}
+       "original_text": "...", "english_text": "<original until translated>",
+       "translation_pending": true, "spoken_at": "2026-09-02T...Z"}
+    - {"type": "transcript_update", "line_id": 12,
+       "english_text": "...", "translation_pending": false}
     - {"type": "requirements", "new": [...], "readiness_percent": 42}
     - {"type": "error", "message": "..."}
-    - {"type": "participant_speaking", "speaker": "...", "speaking": true}
+
+  A line is sent as soon as Whisper returns, carrying original_text in the
+  english_text field so a caption is never blank. The translation follows as
+  a transcript_update for the same line_id — clients should match on line_id
+  and ignore an update for a line they've already replaced.
 
 Client -> Server: nothing required. The socket is receive-only from the
 client's point of view; it just needs to stay open.
+
+Auth: the access-token cookie is checked on the handshake. Without it the
+socket closes with 4401 — a meeting_id alone used to be enough to stream
+someone else's live meeting.
 """
 
 import logging
@@ -26,6 +37,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.connection_manager import meeting_connections
+from app.core.meeting_auth import get_ws_user_id
 from app.meetings.session import session_registry
 
 logger = logging.getLogger("protopilot.ws.meeting")
@@ -37,6 +49,14 @@ router = APIRouter()
 async def meeting_socket(websocket: WebSocket, meeting_id: str):
     await websocket.accept()
 
+    # Closing before accept() doesn't deliver a code the client can read,
+    # so accept first and then reject with a real close frame.
+    user_id = await get_ws_user_id(websocket)
+    if user_id is None:
+        await websocket.send_json({"type": "error", "message": "Not authenticated."})
+        await websocket.close(code=4401)
+        return
+
     session = session_registry.get(meeting_id)
     if session is None:
         await websocket.send_json({"type": "error", "message": f"No session found for meeting_id='{meeting_id}'"})
@@ -44,7 +64,7 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str):
         return
 
     await meeting_connections.connect(meeting_id, websocket)
-    logger.info("meeting %s: client connected to transcript feed", meeting_id)
+    logger.info("meeting %s: client connected to transcript feed (user=%s)", meeting_id, user_id)
 
     try:
         while True:

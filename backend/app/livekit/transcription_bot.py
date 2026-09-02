@@ -14,6 +14,7 @@ host calls /stop-call or /end.
 """
 
 import asyncio
+import datetime
 import logging
 import time
 
@@ -45,10 +46,45 @@ _FRAME_BYTES = int(_SAMPLE_RATE * (_FRAME_MS / 1000) * 2)  # 2 bytes/sample (16-
 _MIN_UTTERANCE_MS = 500
 _MIN_UTTERANCE_BYTES = int(_SAMPLE_RATE * (_MIN_UTTERANCE_MS / 1000) * 2)
 
+# Hard ceiling on one utterance. Someone who talks continuously without ever
+# leaving a vad_silence_timeout_seconds gap would otherwise buffer forever and
+# then hand Whisper one enormous clip — nothing appears on screen the whole
+# time, and memory grows unbounded. Flushing at this point costs a sentence
+# break but keeps captions flowing.
+_MAX_UTTERANCE_MS = 15_000
+_MAX_UTTERANCE_BYTES = int(_SAMPLE_RATE * (_MAX_UTTERANCE_MS / 1000) * 2)
+
 # Bounds how many utterances (across ALL meetings) can be inside an actual
 # Whisper call at once — a burst of simultaneous speakers queues instead
 # of all hitting the CPU at the same moment.
 _transcription_semaphore = asyncio.Semaphore(settings.max_concurrent_transcriptions)
+
+# Strong references to in-flight background tasks. asyncio only holds a weak
+# reference to a bare create_task(), so without this a translation or
+# extraction task can be garbage-collected mid-flight and the work vanishes
+# with no error anywhere.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro, label: str) -> asyncio.Task:
+    """
+    Fire-and-forget with a safety net. A bare create_task() that raises
+    disappears silently — which is how transcript lines were going missing
+    without a single line in the logs.
+    """
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+
+    def _done(t: asyncio.Task):
+        _background_tasks.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.exception("background task failed (%s)", label, exc_info=exc)
+
+    task.add_done_callback(_done)
+    return task
 
 
 class ParticipantAudioBuffer:
@@ -71,6 +107,10 @@ class ParticipantAudioBuffer:
             self._speech_buffer.extend(frame_bytes)
             self._silence_ms = 0
             self._has_speech = True
+            # Long monologue with no real pause — flush anyway so the caption
+            # keeps moving instead of waiting for a gap that may never come.
+            if len(self._speech_buffer) >= _MAX_UTTERANCE_BYTES:
+                return self._flush()
             return None
 
         if not self._has_speech:
@@ -78,23 +118,40 @@ class ParticipantAudioBuffer:
 
         self._silence_ms += _FRAME_MS
         if self._silence_ms >= settings.vad_silence_timeout_seconds * 1000:
-            finished = bytes(self._speech_buffer)
-            self._speech_buffer = bytearray()
-            self._has_speech = False
-            self._silence_ms = 0
-            return finished
+            return self._flush()
 
         # Still inside the allowed gap — keep the silence in the buffer too,
         # short pauses mid-sentence shouldn't get clipped out.
         self._speech_buffer.extend(frame_bytes)
         return None
 
+    def _flush(self) -> bytes:
+        finished = bytes(self._speech_buffer)
+        self._speech_buffer = bytearray()
+        self._has_speech = False
+        self._silence_ms = 0
+        return finished
+
 
 async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_bytes: bytes):
+    """
+    Audio -> caption on screen. Nothing in here waits on a network call.
+
+    Translation and requirement extraction both need a cloud LLM round trip,
+    so they used to sit between Whisper and the broadcast — every caption
+    paid for them, and if the provider was slow or in cooldown the line
+    appeared many seconds late or (when the call raised something other than
+    RuntimeError) never appeared at all. They now run in a follow-up task
+    that patches the line by id.
+    """
     session = session_registry.get(meeting_id)
     if session is None:
         return
 
+    # Captured now, not after transcription: utterances are transcribed
+    # concurrently and finish out of order, so this is what actually
+    # establishes chronology.
+    spoken_at = datetime.datetime.utcnow().isoformat() + "Z"
     utterance_seconds = len(audio_bytes) / (_SAMPLE_RATE * 2)
     t_queued = time.monotonic()
 
@@ -119,38 +176,80 @@ async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_b
     if not result.text:
         return
 
-    t_translate = time.monotonic()
-    english_text = await translate_to_english(result.text, result.language)
-    translate_time = time.monotonic() - t_translate
-
-    total_time = time.monotonic() - t_queued
-    logger.info(
-        "meeting %s: %.2fs of audio -> transcript in %.2fs total (queue_wait=%.2fs whisper=%.2fs translate=%.2fs)",
-        meeting_id, utterance_seconds, total_time, wait_time, whisper_time, translate_time,
-    )
-
-    session.add_transcript_line(
+    line = session.add_transcript_line(
         speaker=speaker_name,
         language=result.language,
         original_text=result.text,
-        english_text=english_text,
+        english_text=None,  # filled in by _finalize_line below
+        spoken_at=spoken_at,
+    )
+
+    logger.info(
+        "meeting %s: %.2fs of audio -> caption in %.2fs (queue_wait=%.2fs whisper=%.2fs); "
+        "translation follows asynchronously",
+        meeting_id, utterance_seconds, time.monotonic() - t_queued, wait_time, whisper_time,
     )
 
     await meeting_connections.broadcast(meeting_id, {
         "type": "transcript",
+        "line_id": line.id,
         "speaker": speaker_name,
         "language": result.language,
         "language_confidence": round(result.language_probability, 3),
         "original_text": result.text,
-        "english_text": english_text,
+        # Deliberately the original for now. The client shows this and swaps
+        # it when transcript_update arrives, so a caption is never blank and
+        # never waits on the network.
+        "english_text": result.text,
+        "translation_pending": True,
+        "spoken_at": line.spoken_at,
     })
 
+    _spawn(
+        _finalize_line(meeting_id, line.id, result.text, result.language),
+        f"finalize meeting={meeting_id} line={line.id}",
+    )
+
+
+async def _finalize_line(meeting_id: str, line_id: int, text: str, language: str):
+    """
+    Off the critical path: translate the line, then re-run requirement
+    extraction. Failures here degrade the line (original text stays visible)
+    but can never remove it.
+    """
+    session = session_registry.get(meeting_id)
+    if session is None:
+        return
+
+    t_translate = time.monotonic()
+    try:
+        english_text = await translate_to_english(text, language)
+    except Exception:  # noqa: BLE001 — translate_to_english only guards RuntimeError internally
+        logger.exception("meeting %s: translation raised for line %d", meeting_id, line_id)
+        english_text = text
+
+    session.set_translation(line_id, english_text)
+    await meeting_connections.broadcast(meeting_id, {
+        "type": "transcript_update",
+        "line_id": line_id,
+        "english_text": english_text,
+        "translation_pending": False,
+    })
+    logger.info(
+        "meeting %s: line %d translated in %.2fs", meeting_id, line_id, time.monotonic() - t_translate
+    )
+
     t_extract = time.monotonic()
-    new_req_dicts = await extract_new_requirements(session)
+    try:
+        new_req_dicts = await extract_new_requirements(session)
+    except Exception:  # noqa: BLE001 — extraction problems must not affect the transcript
+        logger.exception("meeting %s: requirement extraction raised", meeting_id)
+        return
     extract_time = time.monotonic() - t_extract
     if extract_time > 2.0:
         logger.warning(
-            "meeting %s: requirement extraction took %.2fs — this is what delays the Points panel specifically",
+            "meeting %s: requirement extraction took %.2fs — this delays the Points panel only, "
+            "captions are unaffected",
             meeting_id, extract_time,
         )
     if new_req_dicts:
@@ -185,8 +284,9 @@ async def _consume_participant_audio(meeting_id: str, participant_identity: str,
 
                 finished_utterance = buffer.add_frame(chunk)
                 if finished_utterance and len(finished_utterance) > _MIN_UTTERANCE_BYTES:
-                    asyncio.create_task(
-                        _handle_finished_utterance(meeting_id, participant_name, finished_utterance)
+                    _spawn(
+                        _handle_finished_utterance(meeting_id, participant_name, finished_utterance),
+                        f"utterance meeting={meeting_id} speaker={participant_name}",
                     )
     except Exception:  # noqa: BLE001 — a stream error for one participant shouldn't kill the bot for everyone else
         logger.exception("meeting %s: audio stream ended for %s (%s)", meeting_id, participant_name, participant_identity)

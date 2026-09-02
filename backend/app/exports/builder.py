@@ -43,7 +43,9 @@ def build_export_zip(session: MeetingSession) -> bytes:
             lines = ["# Meeting Transcript\n"]
             for line in session.transcript:
                 lines.append(f"**{line.speaker}** ({line.language}): {line.original_text}")
-                if line.language != "en":
+                # english_text is None while a translation is still in flight —
+                # only quote it once it's actually different from the original.
+                if line.english_text and line.english_text != line.original_text:
                     lines.append(f"> {line.english_text}")
                 lines.append("")
             zf.writestr("00_transcript.md", "\n".join(lines))

@@ -318,7 +318,13 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
                   <span className="pv-chrome-dot" style={{ background: "#28C840" }} />
                 </div>
                 <div className="pv-device-screen">
-                  <iframe title="Generated prototype" srcDoc={prototypeHtml} sandbox="allow-scripts allow-same-origin allow-forms" />
+                  {/* This HTML is LLM-generated, i.e. untrusted, and we are inside
+                      Electron. "allow-scripts allow-same-origin" together cancels
+                      the sandbox out — the frame would share our origin and could
+                      reach the parent DOM, our cookies and localStorage, or just
+                      strip its own sandbox attribute. Scripts and forms are all a
+                      clickable prototype needs; the origin stays opaque. */}
+                  <iframe title="Generated prototype" srcDoc={prototypeHtml} sandbox="allow-scripts allow-forms" />
                 </div>
               </div>
             )}
