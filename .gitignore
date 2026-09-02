@@ -1,0 +1,43 @@
+# ---- Secrets: never commit these ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+env/
+
+# ---- Node / Electron ----
+node_modules/
+dist/
+dist-electron/
+release/
+*.log
+
+# ---- Local databases ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Model / ASR caches ----
+.cache/
+models/
+*.bin.tmp
+
+# ---- Debug + generated artifacts ----
+backend/stitch_debug_last_response.json
+backend/exports/
+*.zip
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,29 @@
+# Original (already in your venv, listed here for a clean fresh install too)
+fastapi
+uvicorn[standard]
+httpx
+pydantic
+pydantic-settings
+python-dotenv
+faster-whisper
+numpy
+scipy
+sounddevice
+
+# Auth (Phase 1)
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+passlib[bcrypt]>=1.7
+pyjwt[crypto]>=2.9
+email-validator>=2.2
+aiosmtplib>=3.0
+
+# OAuth (Phase 4) — no extra packages, uses httpx already listed above
+
+# LiveKit video call + per-participant transcription (Phase 6)
+livekit>=0.19
+livekit-api>=0.8
+webrtcvad>=2.0.10
+
+mcp
+httpx
