@@ -13,7 +13,13 @@ touches the network or the database, so it runs anywhere with plain Python.
 
 import unittest
 
-from app.meetings.session import MeetingSession
+try:
+    from tests import stubs
+except ImportError:  # discovered with tests/ as the root dir
+    import stubs
+stubs.install()
+
+from app.meetings.session import MeetingSession  # noqa: E402
 
 
 class TranscriptLineIdsTest(unittest.TestCase):

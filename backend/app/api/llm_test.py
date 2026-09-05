@@ -17,8 +17,10 @@ async def chat(req: ChatRequest):
           "messages": [{"role": "user", "content": "Say hello in 5 words."}]
         }
 
-    Use this to confirm NIM -> OpenRouter -> Groq fallback is wired
-    correctly before agents start depending on it.
+    Use this to confirm the Groq -> NIM -> OpenRouter fallback is wired
+    correctly before agents start depending on it. `provider` and `model`
+    in the response say which one actually answered — worth checking, since
+    a retired model id gets swapped for a live one at runtime.
     """
     try:
         result = await llm_router.chat(

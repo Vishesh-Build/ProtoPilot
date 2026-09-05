@@ -12,7 +12,8 @@ Protocol:
      "status": "working", "progress": 50}
     {"type": "agent_log", "agent": "architect", "message": "..."}
     {"type": "agent_output", "agent": "architect", "output": "..."}
-    {"type": "pipeline_complete"}
+    {"type": "pipeline_complete"}   # every agent completed
+    {"type": "pipeline_failed", "message": "..."}  # run is OVER, one or more agents failed
     {"type": "error", "message": "..."}  (e.g. no approved requirements yet, or not the host)
 
 The socket closes on its own once the pipeline finishes — this isn't a
@@ -80,6 +81,28 @@ async def generate_socket(websocket: WebSocket, meeting_id: str):
         await websocket.close(code=4409)
         return
 
+    # A completed run already exists: replay its outputs for free instead of
+    # starting a second paid 9-agent run. Without this, re-opening the
+    # Generation Pipeline page (which re-connects this socket) re-ran the
+    # whole pipeline every time — the UI looks the same, the bill doesn't.
+    #
+    # `?force=1` (the host pressing "Regenerate") skips the replay on purpose,
+    # so a run picks up requirements approved *after* the last build. Without
+    # this the replay always returned the stale outputs and a newly-approved
+    # requirement could never make it into the prototype.
+    force = websocket.query_params.get("force") in ("1", "true", "yes")
+    if not force and session.agent_outputs.get("prototype"):
+        logger.info("meeting %s: replaying already-generated outputs (no re-run)", meeting_id)
+        for agent_id, output in session.agent_outputs.items():
+            await websocket.send_json({
+                "type": "agent_update", "agent": agent_id,
+                "status": "completed", "progress": 100,
+            })
+            await websocket.send_json({"type": "agent_output", "agent": agent_id, "output": output})
+        await websocket.send_json({"type": "pipeline_complete"})
+        await websocket.close()
+        return
+
     async def emit(event: dict):
         try:
             await websocket.send_json(event)
@@ -89,7 +112,9 @@ async def generate_socket(websocket: WebSocket, meeting_id: str):
     _running_pipelines.add(meeting_id)
     try:
         final_states = await run_pipeline(approved, emit)
-        session.agent_outputs = {agent_id: state.output for agent_id, state in final_states.items() if state.output}
+        session.replace_agent_outputs(
+            {agent_id: state.output for agent_id, state in final_states.items() if state.output}
+        )
     except WebSocketDisconnect:
         logger.info("meeting %s: client disconnected during generation", meeting_id)
         return

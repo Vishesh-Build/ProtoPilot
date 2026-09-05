@@ -1,5 +1,31 @@
 clip,language,spoken_text,english
-01_gu.wav,gu,,
-02_hi.wav,hi,,
-03_en.wav,en,,
-04_mix.wav,mix,,
+01_gu.wav,gu,અમારે લોગિન સ્ક્રીન પર ઈમેલ અને પાસવર્ડ બંને જોઈએ છે.,We need both email and password on the login screen.
+02_gu.wav,gu,ડેશબોર્ડ પર દરેક યુઝરની પેમેન્ટ હિસ્ટ્રી દેખાવી જોઈએ.,The dashboard should show every user's payment history.
+03_gu.wav,gu,રિપોર્ટ ડાઉનલોડ કરવાનું બટન ઉપરના જમણા ખૂણામાં રાખો.,Put the report download button in the top right corner.
+04_gu.wav,gu,એડમિન પેનલમાં બધા યુઝર્સની યાદી અને તેમનો સ્ટેટસ દેખાય.,The admin panel should show all users in a list with their status.
+05_hi.wav,hi,लॉगिन पेज पर ओटीपी वेरिफिकेशन भी होना चाहिए।,The login page should also have OTP verification.
+06_hi.wav,hi,पेमेंट गेटवे से रीफंड का ऑप्शन डायरेक्ट ऐप में दिखाना है।,The refund option from the payment gateway should be shown directly in the app.
+07_hi.wav,hi,हर ट्रांजैक्शन की डिटेल रिपोर्ट में डेट और टाइम के साथ आनी चाहिए।,Every transaction's details should appear in the report with date and time.
+08_hi.wav,hi,नोटिफिकेशन सेटिंग में यूजर खुद चुन सके कि कौन सी अलर्ट चाहिए।,In notification settings the user should be able to choose which alerts they want.
+09_en.wav,en,We need a dashboard that shows monthly revenue and active users.,We need a dashboard that shows monthly revenue and active users.
+10_en.wav,en,The admin panel should let us export the user list as a CSV file.,The admin panel should let us export the user list as a CSV file.
+11_en.wav,en,Please add a search bar on the orders page with filters by date.,Please add a search bar on the orders page with filters by date.
+12_en.wav,en,The API should support pagination for large result sets.,The API should support pagination for large result sets.
+13_mix_gh.wav,mix_gh,"લોગિન કરતા વખતे OTP वेरिफिकेशन જોઈએ છે, वरना यूજर गलत पેमेन્ટ કરશે.","OTP verification is needed while logging in, otherwise the user will make wrong payments."
+14_mix_gh.wav,mix_gh,ડેશબોર્ડ पर हर यूજरनું स्कोर अને रीफंड स્ટેટસ दેખાવો.,Show every user's score and refund status on the dashboard.
+15_mix_gh.wav,mix_gh,રિપોર્ટ डाउनलोड करने का बटन डેશબોર્� पर ही रাখો.,Keep the report download button on the dashboard itself.
+16_mix_gh.wav,mix_gh,એડમિન पैनल में टीम के सब लोगोंને રोल आપવાનું આવશે.,The admin panel will need to let us assign roles to the whole team.
+17_mix_ge.wav,mix_ge,લોગિન સ્ક્રીન પર forgot password નો લિંક પણ રાખો.,Also keep a forgot password link on the login screen.
+18_mix_ge.wav,mix_ge,પેમેન્ટ કર્યા પછી confirmation email આવવો જોઈએ.,A confirmation email should arrive after payment.
+19_mix_ge.wav,mix_ge,ડેશબોર્ડ પર monthly revenue નો graph દેખાડો.,Show a graph of monthly revenue on the dashboard.
+20_mix_ge.wav,mix_ge,રિપોર્ટ માં બધા orders ની status export કરો.,Export the status of all orders in the report.
+21_fast_hi.wav,fast_hi,"जल्दी बताइए, पेमेंट गेटवे में कौन से मोड चाहिए, UPI, कार्ड, नेट बैंकिंग तीनों, और रीफंड का स्लैब भी बता दीजिए।","Quickly tell me which payment gateway modes are needed, UPI, card, net banking, all three, and also tell us the refund slab."
+22_fast_gu.wav,fast_gu,"ઝડપથી કહો, લોગિન માં ઈમેલ, ઓટીપી, પાસવર્ડ ત્રણેય જોઈએ છે, અને ડેશબોર્ડ પર રિપોર્ટ પણ ડાયરેક્ટ ડાઉનલોડ થવો જોઈએ.","Quickly, login needs email, OTP, password, all three, and the report on the dashboard should be directly downloadable too."
+23_short_hi.wav,short_hi,डार्क मोड भी चाहिए।,Dark mode is also needed.
+24_short_gu.wav,short_gu,બટન વાદળી રાખો.,Keep the button blue.
+25_num_en.wav,num_en,Rahul from Infosys approved a budget of forty five thousand rupees on August twelfth.,Rahul from Infosys approved a budget of forty five thousand rupees on August twelfth.
+26_num_hi.wav,num_hi,"मीटिंग 15 अगस्त को दोपहर 3 बजे है, नेहा और आरव भी आएंगे।","The meeting is on August 15 at 3 in the afternoon, Neha and Aarav will also come."
+27_noisy_gu.wav,noisy_gu,એડમિન પેનલમાં બધા યુઝર્સની યાદી અને તેમનો સ્ટેટસ દેખાય.,The admin panel should show all users in a list with their status.
+28_noisy_hi.wav,noisy_hi,लॉगिन पेज पर ओटीपी वेरिफिकेशन भी होना चाहिए।,The login page should also have OTP verification.
+29_noisy_short.wav,noisy_short,રિપોર્ટ કાલે મોકલો.,Send the report tomorrow.
+30_noisy_short2.wav,noisy_short2,मीटिंग कोई नहीं छोड़ेगा।,No one will skip the meeting.

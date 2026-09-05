@@ -9,6 +9,6 @@ class NimProvider(OpenAICompatibleProvider):
         super().__init__(
             base_url=settings.nim_base_url,
             api_key=settings.nim_api_key,
-            model=settings.nim_model,
+            models=settings.nim_models,
             timeout=settings.llm_request_timeout_seconds,
         )

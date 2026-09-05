@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ProtoPilot</title>
+
+    <!--
+      Inter, loaded so it can NEVER block first paint or hang the
+      app when there is no network (packaged Electron, or a venue
+      with dead wifi): the stylesheet is fetched as `print` media
+      and promoted to `all` only once it has actually loaded.
+      If it never loads, src/global.css falls back to Segoe UI.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
   </head>
   <body>
     <div id="root"></div>

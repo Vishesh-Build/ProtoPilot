@@ -26,8 +26,8 @@ from app.config import settings
 from app.core.connection_manager import meeting_connections
 from app.meetings.session import session_registry
 from app.requirements.extractor import extract_new_requirements
+from app.transcription import asr
 from app.transcription.translate import translate_to_english
-from app.transcription.whisper_service import transcribe_utterance
 
 logger = logging.getLogger("protopilot.livekit.bot")
 
@@ -48,16 +48,16 @@ _MIN_UTTERANCE_BYTES = int(_SAMPLE_RATE * (_MIN_UTTERANCE_MS / 1000) * 2)
 
 # Hard ceiling on one utterance. Someone who talks continuously without ever
 # leaving a vad_silence_timeout_seconds gap would otherwise buffer forever and
-# then hand Whisper one enormous clip — nothing appears on screen the whole
-# time, and memory grows unbounded. Flushing at this point costs a sentence
-# break but keeps captions flowing.
-_MAX_UTTERANCE_MS = 15_000
+# then hand the ASR engine one enormous clip — nothing appears on screen the
+# whole time, and memory grows unbounded. Flushing here costs a sentence break
+# but keeps captions flowing.
+#
+# 8s, not 15s: transcription time scales with clip length, so on the CPU path a
+# single 15s chunk measured 79.48s to transcribe on its own. Long chunks are
+# also what push everyone else's utterances into the queue behind them, so the
+# cost of one monologue lands on the whole meeting.
+_MAX_UTTERANCE_MS = 8_000
 _MAX_UTTERANCE_BYTES = int(_SAMPLE_RATE * (_MAX_UTTERANCE_MS / 1000) * 2)
-
-# Bounds how many utterances (across ALL meetings) can be inside an actual
-# Whisper call at once — a burst of simultaneous speakers queues instead
-# of all hitting the CPU at the same moment.
-_transcription_semaphore = asyncio.Semaphore(settings.max_concurrent_transcriptions)
 
 # Strong references to in-flight background tasks. asyncio only holds a weak
 # reference to a bare create_task(), so without this a translation or
@@ -135,14 +135,17 @@ class ParticipantAudioBuffer:
 
 async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_bytes: bytes):
     """
-    Audio -> caption on screen. Nothing in here waits on a network call.
+    Audio -> caption on screen. Nothing in here waits on a network call
+    unless it has to.
 
-    Translation and requirement extraction both need a cloud LLM round trip,
-    so they used to sit between Whisper and the broadcast — every caption
-    paid for them, and if the provider was slow or in cooldown the line
-    appeared many seconds late or (when the call raised something other than
-    RuntimeError) never appeared at all. They now run in a follow-up task
-    that patches the line by id.
+    Requirement extraction needs a cloud LLM round trip, so it used to sit
+    between transcription and the broadcast — every caption paid for it, and
+    if the provider was slow or in cooldown the line appeared many seconds
+    late or (when the call raised something other than RuntimeError) never
+    appeared at all. It now runs in a follow-up task that patches the line
+    by id. Translation is in the same follow-up task, except when the ASR
+    engine already returned English (Sarvam), in which case there is nothing
+    left to wait for.
     """
     session = session_registry.get(meeting_id)
     if session is None:
@@ -155,23 +158,25 @@ async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_b
     utterance_seconds = len(audio_bytes) / (_SAMPLE_RATE * 2)
     t_queued = time.monotonic()
 
-    async with _transcription_semaphore:
+    # Awaiting this also loads the local Whisper model on the very first
+    # utterance of the process — the limit depends on which device it lands
+    # on — so it counts as queue time and belongs inside the measurement.
+    semaphore = await asr.get_concurrency_semaphore()
+    async with semaphore:
         wait_time = time.monotonic() - t_queued
         if wait_time > 1.0:
-            # Longer than ~1s means the semaphore (max_concurrent_transcriptions)
-            # was the bottleneck, not Whisper itself — a backlog of utterances
-            # queued up faster than they could be processed.
             logger.warning(
-                "meeting %s: utterance for %s waited %.2fs in queue before a Whisper slot freed up",
-                meeting_id, speaker_name, wait_time,
+                "meeting %s: utterance for %s waited %.2fs for a free %s slot — utterances are "
+                "arriving faster than they can be transcribed",
+                meeting_id, speaker_name, wait_time, asr.active_provider_name(),
             )
-        t_whisper = time.monotonic()
+        t_asr = time.monotonic()
         try:
-            result = await transcribe_utterance(audio_bytes)
+            result = await asr.transcribe(audio_bytes, speaker=speaker_name)
         except Exception:  # noqa: BLE001 — one bad utterance shouldn't kill the bot
             logger.exception("meeting %s: transcription failed for %s", meeting_id, speaker_name)
             return
-        whisper_time = time.monotonic() - t_whisper
+        asr_time = time.monotonic() - t_asr
 
     if not result.text:
         return
@@ -180,15 +185,17 @@ async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_b
         speaker=speaker_name,
         language=result.language,
         original_text=result.text,
-        english_text=None,  # filled in by _finalize_line below
+        # Already English from Sarvam; None from Whisper, filled in below.
+        english_text=result.english_text,
         spoken_at=spoken_at,
     )
 
     logger.info(
-        "meeting %s: %s | %.2fs audio -> caption in %.2fs (queue_wait=%.2fs whisper=%.2fs) "
+        "meeting %s: %s | %.2fs audio -> caption in %.2fs (queue_wait=%.2fs %s=%.2fs) "
         "| lang=%s conf=%.2f | text=%r",
         meeting_id, speaker_name, utterance_seconds, time.monotonic() - t_queued,
-        wait_time, whisper_time, result.language, result.language_probability, result.text,
+        wait_time, result.provider, asr_time, result.language,
+        result.language_probability, result.text,
     )
     if result.language_probability < 0.6:
         # Low confidence on a short utterance is the usual reason a Gujarati
@@ -205,47 +212,62 @@ async def _handle_finished_utterance(meeting_id: str, speaker_name: str, audio_b
         "language": result.language,
         "language_confidence": round(result.language_probability, 3),
         "original_text": result.text,
-        # Deliberately the original for now. The client shows this and swaps
-        # it when transcript_update arrives, so a caption is never blank and
-        # never waits on the network.
-        "english_text": result.text,
-        "translation_pending": True,
+        # Either the real translation (Sarvam) or the original text as a
+        # placeholder the client swaps when transcript_update arrives, so a
+        # caption is never blank and never waits on the network.
+        "english_text": result.english_text or result.text,
+        "translation_pending": result.english_text is None,
         "spoken_at": line.spoken_at,
     })
 
     _spawn(
-        _finalize_line(meeting_id, line.id, result.text, result.language),
+        _finalize_line(meeting_id, line.id, result.text, result.language, result.english_text),
         f"finalize meeting={meeting_id} line={line.id}",
     )
 
 
-async def _finalize_line(meeting_id: str, line_id: int, text: str, language: str):
+async def _finalize_line(
+    meeting_id: str,
+    line_id: int,
+    text: str,
+    language: str,
+    english_text: str | None = None,
+):
     """
-    Off the critical path: translate the line, then re-run requirement
-    extraction. Failures here degrade the line (original text stays visible)
-    but can never remove it.
+    Off the critical path: translate the line (unless the ASR engine already
+    returned English), then re-run requirement extraction. Failures here
+    degrade the line — the original text stays visible — but can never
+    remove it.
+
+    `english_text` is what the ASR engine gave us. Sarvam's
+    speech-to-text-translate fills it, and then there is nothing to
+    translate: no LLM round trip, no second broadcast, and one fewer thing
+    that can fail per caption. Whisper leaves it None, which is the signal
+    to do the translation here.
     """
     session = session_registry.get(meeting_id)
     if session is None:
         return
 
-    t_translate = time.monotonic()
-    try:
-        english_text = await translate_to_english(text, language)
-    except Exception:  # noqa: BLE001 — translate_to_english only guards RuntimeError internally
-        logger.exception("meeting %s: translation raised for line %d", meeting_id, line_id)
-        english_text = text
+    if english_text is None:
+        t_translate = time.monotonic()
+        try:
+            english_text = await translate_to_english(text, language)
+        except Exception:  # noqa: BLE001 — translate_to_english only guards RuntimeError internally
+            logger.exception("meeting %s: translation raised for line %d", meeting_id, line_id)
+            english_text = text
 
-    session.set_translation(line_id, english_text)
-    await meeting_connections.broadcast(meeting_id, {
-        "type": "transcript_update",
-        "line_id": line_id,
-        "english_text": english_text,
-        "translation_pending": False,
-    })
-    logger.info(
-        "meeting %s: line %d translated in %.2fs", meeting_id, line_id, time.monotonic() - t_translate
-    )
+        session.set_translation(line_id, english_text)
+        await meeting_connections.broadcast(meeting_id, {
+            "type": "transcript_update",
+            "line_id": line_id,
+            "english_text": english_text,
+            "translation_pending": False,
+        })
+        logger.info(
+            "meeting %s: line %d translated in %.2fs",
+            meeting_id, line_id, time.monotonic() - t_translate,
+        )
 
     t_extract = time.monotonic()
     try:
@@ -301,6 +323,10 @@ async def _consume_participant_audio(meeting_id: str, participant_identity: str,
 
 
 async def run_transcription_bot(meeting_id: str):
+    # New meeting, new language priors — don't carry the previous meeting's
+    # languages into this one (they'd be sent as forced-script hints).
+    asr.reset_language_tracking()
+
     room = rtc.Room()
     tasks: dict[str, asyncio.Task] = {}
 

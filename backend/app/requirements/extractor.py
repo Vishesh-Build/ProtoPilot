@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 
+from app.config import settings
 from app.llm.router import llm_router
 from app.meetings.session import MeetingSession, TranscriptLine
 
@@ -56,15 +57,36 @@ def _build_user_prompt(existing_titles: list[str], new_lines: list[TranscriptLin
 
 
 def _parse_json_array(raw: str) -> list[dict]:
-    """Models sometimes wrap JSON in ```json fences despite instructions — strip if present."""
-    cleaned = raw.strip()
+    """
+    Get the JSON array out of a model reply, however it chose to wrap it.
+
+    Three wrappings have all shown up in practice despite the instruction:
+    ```json fences, a "Sure, here are the requirements:" preamble, and a
+    trailing sentence afterwards. Losing a whole extraction round to a
+    politeness the model added is the wrong trade — the round is retried
+    with more context, but the client is still waiting on those points.
+
+    Raises ValueError (json.JSONDecodeError is a subclass) when there is
+    genuinely no array in there, which the caller treats as "leave the lines
+    pending and try again next round".
+    """
+    cleaned = (raw or "").strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         if cleaned.startswith("json"):
             cleaned = cleaned[4:]
         cleaned = cleaned.strip()
 
-    parsed = json.loads(cleaned)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Second attempt: the widest span that could be an array. Only worth
+        # trying when there is one, and it must not swallow the real error.
+        start, end = cleaned.find("["), cleaned.rfind("]")
+        if start == -1 or end <= start:
+            raise
+        parsed = json.loads(cleaned[start:end + 1])
+
     if not isinstance(parsed, list):
         raise ValueError("expected a JSON array")
     return parsed
@@ -103,7 +125,11 @@ async def extract_new_requirements(session: MeetingSession) -> list[dict]:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": _build_user_prompt(session.existing_titles(), new_lines)},
                 ],
-                max_tokens=800,
+                # Not a hardcoded 800. Reasoning models spend this same budget
+                # thinking before they emit anything, so a tight ceiling comes
+                # back as `content: null` — an empty Points panel with an
+                # HTTP 200 behind it. One knob, tunable from .env.
+                max_tokens=settings.llm_default_max_tokens,
                 temperature=0.2,
             )
             items = _parse_json_array(result.text)

@@ -83,7 +83,13 @@ async def refresh(
     user = result.scalar_one_or_none()
 
     now = datetime.datetime.now(datetime.timezone.utc)
-    if user is None or user.refresh_token_expires_at is None or user.refresh_token_expires_at < now:
+    # SQLite (unlike Postgres/asyncpg) returns naive datetimes even from a
+    # timezone-aware column, and comparing naive vs aware raises. Normalise
+    # before comparing so the backend works on both databases.
+    expires_at = user.refresh_token_expires_at if user is not None else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
+    if user is None or expires_at is None or expires_at < now:
         raise unauthorized
 
     await issue_session(user, db, response)  # rotates the refresh token too
@@ -162,7 +168,11 @@ async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(
     invalid = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This reset link is invalid or has expired.")
 
     now = datetime.datetime.now(datetime.timezone.utc)
-    if user is None or user.reset_token_expires_at is None or user.reset_token_expires_at < now:
+    # Same SQLite/Postgres naive-vs-aware difference as /auth/refresh.
+    reset_expires = user.reset_token_expires_at if user is not None else None
+    if reset_expires is not None and reset_expires.tzinfo is None:
+        reset_expires = reset_expires.replace(tzinfo=datetime.timezone.utc)
+    if user is None or reset_expires is None or reset_expires < now:
         raise invalid
 
     user.hashed_password = hash_password(body.new_password)

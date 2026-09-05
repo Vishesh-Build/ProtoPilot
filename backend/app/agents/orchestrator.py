@@ -19,10 +19,16 @@ from typing import Awaitable, Callable
 
 from app.agents.definitions import AGENT_DEFINITIONS, EXECUTION_WAVES
 from app.agents.state import AgentState, AgentStatus
+from app.config import settings
 from app.llm.router import llm_router
 from app.services import stitch_service
 
 logger = logging.getLogger("protopilot.agents")
+
+# Delay added per agent position within a wave, to keep a wave from arriving at
+# a free-tier per-minute ceiling as one burst. The widest wave today is two
+# agents (ui + backend), so in practice this adds 0.2s to a generation run.
+_WAVE_STAGGER_SECONDS = 0.2
 
 EmitFn = Callable[[dict], Awaitable[None]]
 
@@ -75,6 +81,15 @@ async def run_pipeline(
     }
     requirements_block = _build_requirements_block(requirements)
 
+    # Serialise the pipeline's LLM calls so concurrent wave-mates (ui + backend
+    # share a wave) don't fire simultaneous provider calls that split a free
+    # tier's per-minute token budget and knock each other into a 429/overload —
+    # the failure that took out the backend agent and everything downstream in
+    # the live run. Created here (not at module scope) so it binds to this
+    # call's event loop and each run gets a fresh one. See
+    # settings.llm_generation_concurrency.
+    llm_gate = asyncio.Semaphore(max(1, settings.llm_generation_concurrency))
+
     async def run_one(agent_id: str):
         state = states[agent_id]
         definition = AGENT_DEFINITIONS[agent_id]
@@ -100,16 +115,25 @@ async def run_pipeline(
 
         try:
             if agent_id == "prototype":
-                state.output = await _run_prototype_agent(context, definition, emit, agent_id)
+                state.output = await _run_prototype_agent(context, definition, emit, agent_id, llm_gate)
             else:
-                result = await llm_router.chat(
-                    messages=[
-                        {"role": "system", "content": definition.system_prompt},
-                        {"role": "user", "content": context},
-                    ],
-                    max_tokens=definition.max_tokens,
-                    temperature=0.3,
-                )
+                # One provider call at a time across the whole pipeline — see
+                # llm_gate above.
+                async with llm_gate:
+                    result = await llm_router.chat(
+                        messages=[
+                            {"role": "system", "content": definition.system_prompt},
+                            {"role": "user", "content": context},
+                        ],
+                        max_tokens=definition.max_tokens,
+                        temperature=0.3,
+                        # Generation is expected to take a minute or two, so it
+                        # is worth waiting out a provider's honest Retry-After
+                        # (Groq's live 429s asked ~24s) rather than failing this
+                        # agent and cascading every agent that depends on it.
+                        # The caption path keeps its short default ceiling.
+                        max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
+                    )
                 state.output = result.text.strip()
 
             state.status = AgentStatus.COMPLETED
@@ -121,26 +145,76 @@ async def run_pipeline(
                 "agent": agent_id,
                 "output": state.output,
             })
-        except RuntimeError as e:
-            logger.warning("agent %s failed: %s", agent_id, e)
+        except Exception as e:  # noqa: BLE001
+            # RuntimeError is the expected "all providers failed" from the
+            # router, but a single agent hitting any unexpected error must
+            # still fail only ITSELF, not tear down the whole asyncio.gather
+            # for its wave and take the agents that would have succeeded with
+            # it. Its dependents are skipped (dependency-failed) as usual, and
+            # the run ends in pipeline_failed with this agent named — never a
+            # false pipeline_complete. logger.exception keeps the traceback for
+            # anything that isn't the ordinary provider-exhausted RuntimeError.
+            if isinstance(e, RuntimeError):
+                logger.warning("agent %s failed: %s", agent_id, e)
+            else:
+                logger.exception("agent %s failed with an unexpected error", agent_id)
             state.status = AgentStatus.FAILED
             state.progress = 0
             state.logs.append(f"Failed: {e}")
             await emit({"type": "agent_update", **state.to_event_dict()})
             await emit({"type": "agent_log", "agent": agent_id, "message": state.logs[-1]})
 
-    for wave in EXECUTION_WAVES:
-        await asyncio.gather(*(run_one(agent_id) for agent_id in wave))
+    async def run_wave(wave):
+        """
+        Everything in a wave still runs concurrently — that is the point of the
+        DAG — but each agent's first request is offset slightly.
 
-    await emit({"type": "pipeline_complete"})
+        This is a cushion, not the fix. The waves are mostly one agent wide
+        (only ui+backend share one), so the 429 in the live run came from the
+        RATE of sequential calls each spending ~1600 output tokens, not from a
+        burst. The real fix is the router retrying a 429 instead of writing the
+        provider off for 60s — that cooldown is what failed UI, Backend, QA,
+        DevOps and Prototype in one go. This offset only keeps the single
+        shared wave from landing in the same instant; widest wave is two, so it
+        costs 0.2s.
+        """
+        async def staggered(index, agent_id):
+            if index:
+                await asyncio.sleep(_WAVE_STAGGER_SECONDS * index)
+            await run_one(agent_id)
+
+        await asyncio.gather(*(staggered(i, a) for i, a in enumerate(wave)))
+
+    for wave in EXECUTION_WAVES:
+        await run_wave(wave)
+
+    failed = [a for a, s in states.items() if s.status == AgentStatus.FAILED]
+    if failed:
+        # An agent failed — say so instead of claiming victory. The old
+        # "pipeline_complete" made the frontend show "Prototype ready — open
+        # it in Prototype Viewer" while the Prototype agent sat FAILED at 0%,
+        # which is the worst possible lie to tell judges.
+        await emit({
+            "type": "pipeline_failed",
+            "message": f"Generation finished with {len(failed)} failed agent(s): {', '.join(failed)}. "
+                       "Check the backend server logs.",
+        })
+    else:
+        await emit({"type": "pipeline_complete"})
     return states
 
 
-async def _run_prototype_agent(context: str, definition, emit: EmitFn, agent_id: str) -> str:
+async def _run_prototype_agent(
+    context: str, definition, emit: EmitFn, agent_id: str, llm_gate: asyncio.Semaphore,
+) -> str:
     """
     Tries Stitch first (real design tool, proper UI). Falls back to the
     original small-LLM raw-HTML generation if Stitch isn't configured or
     the call fails — the pipeline never hard-fails because of Stitch.
+
+    `llm_gate` serialises the LLM fallback with the rest of the pipeline's
+    provider calls; the Stitch call sits outside it, because Stitch is a
+    separate service, not the shared free-tier token budget.
     """
     stitch_html = await stitch_service.generate_prototype_html(context)
     if stitch_html:
@@ -148,14 +222,16 @@ async def _run_prototype_agent(context: str, definition, emit: EmitFn, agent_id:
         return stitch_html
 
     await emit({"type": "agent_log", "agent": agent_id, "message": "Stitch unavailable — falling back to LLM-generated HTML."})
-    result = await llm_router.chat(
-        messages=[
-            {"role": "system", "content": definition.system_prompt},
-            {"role": "user", "content": context},
-        ],
-        max_tokens=definition.max_tokens,
-        temperature=0.3,
-    )
+    async with llm_gate:
+        result = await llm_router.chat(
+            messages=[
+                {"role": "system", "content": definition.system_prompt},
+                {"role": "user", "content": context},
+            ],
+            max_tokens=definition.max_tokens,
+            temperature=0.3,
+            max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
+        )
     html = _strip_markdown_fences(result.text.strip())
     # Same click-safety-net Stitch screens get — guarantees no dead button
     # even if the model forgot to wire something up.

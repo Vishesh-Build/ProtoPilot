@@ -9,6 +9,6 @@ class GroqProvider(OpenAICompatibleProvider):
         super().__init__(
             base_url=settings.groq_base_url,
             api_key=settings.groq_api_key,
-            model=settings.groq_model,
+            models=settings.groq_models,
             timeout=settings.llm_request_timeout_seconds,
         )

@@ -45,8 +45,11 @@ the screenshot URL and treating it as HTML produces garbage (raw PNG
 bytes rendered as text).
 
 Since Stitch generates multiple screens per call, they're combined here
-into ONE self-contained HTML file with a simple JS tab bar so the
-pipeline still produces a single "prototype" output, same as before.
+into ONE self-contained HTML file so the pipeline still produces a single
+"prototype" output. The screens are wired for in-page navigation — a click
+on a nav link, button, or card whose text names another screen switches to
+it — with a discreet corner screen-switcher as a fallback so every screen
+stays reachable (see _combine_screens and _build_screen_nav_script).
 
 If STITCH_API_KEY isn't configured, or any step fails for any reason,
 generate_prototype_html returns None — the caller (orchestrator.py)
@@ -57,6 +60,7 @@ never hard-fails the whole pipeline.
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -218,6 +222,113 @@ _CLICK_SAFETY_NET_SCRIPT = """
 """
 
 
+# Words that never help tell one screen from another, so they're dropped
+# before working out each screen's distinctive keywords. Pure articles/
+# prepositions plus the generic "this is a screen" nouns Stitch loves to
+# suffix titles with ("... Dashboard", "... Panel"). Brand words (e.g.
+# "DineFlow") are NOT listed here — they're detected automatically as the
+# tokens that appear in every screen's title, since the brand is invented
+# fresh per run and can't be hard-coded.
+_NAV_STOPWORDS = frozenset({
+    "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "my", "your",
+    "page", "screen", "view", "console", "panel", "app", "application",
+})
+
+
+def _screen_nav_tokens(titles: list[str]) -> list[list[str]]:
+    """
+    For each screen title, returns the list of lowercase tokens that are
+    DISTINCTIVE to that screen — the words a click's text can be matched
+    against to decide which screen it means.
+
+    Two things get stripped: the stopwords above, and any token that appears
+    in EVERY title (the invented brand name — "DineFlow" in all four titles
+    of the live run — which identifies no single screen). A token shared by
+    some-but-not-all screens (e.g. "Management" in both "The Hearth -
+    Management" and "User Management") is ambiguous, so it's kept only if a
+    screen would otherwise have no distinctive token at all — that way every
+    screen stays matchable without a shared word hijacking clicks meant for
+    its twin.
+    """
+    per_title_tokens: list[list[str]] = []
+    for title in titles:
+        toks = [t for t in re.findall(r"[a-z0-9]+", title.lower())
+                if len(t) >= 2 and t not in _NAV_STOPWORDS]
+        per_title_tokens.append(toks)
+
+    n = len(titles)
+    freq: dict[str, int] = {}
+    for toks in per_title_tokens:
+        for t in set(toks):
+            freq[t] = freq.get(t, 0) + 1
+
+    result: list[list[str]] = []
+    for toks in per_title_tokens:
+        seen: set[str] = set()
+        # Brand words (in every title) are useless; drop them outright.
+        candidates = [t for t in toks if not (n > 1 and freq[t] == n)]
+        unique = [t for t in candidates if freq[t] == 1 and not (t in seen or seen.add(t))]
+        if unique:
+            result.append(unique)
+        else:
+            # No word unique to this screen — fall back to its non-brand
+            # tokens (shared ones included) so it's still reachable by click.
+            seen.clear()
+            result.append([t for t in candidates if not (t in seen or seen.add(t))])
+    return result
+
+
+def _build_screen_nav_script(nav_tokens: list[list[str]], current_index: int) -> str:
+    """
+    An in-iframe script that turns a click on any nav link / button / card
+    whose text names ANOTHER screen into a real screen switch, by calling
+    the combiner's window.parent.ppShowScreen(idx).
+
+    This is what makes the prototype navigable the way the user expects —
+    click "Orders" or a restaurant card and you land on that screen — instead
+    of only the top tab bar switching screens. It runs in capture phase and,
+    on a match, stops propagation so it wins over Stitch's own dead "#" links
+    and the click-safety-net ping; a click it can't map to a screen is left
+    untouched, so whatever Stitch actually wired up still works.
+    """
+    payload = json.dumps({"tokens": nav_tokens, "current": current_index})
+    return """
+<script>
+(function () {
+  var NAV = %s;
+  function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function singular(w) { return (w.length > 3 && w.charAt(w.length - 1) === 's') ? w.slice(0, -1) : w; }
+  function matchScreen(text) {
+    var words = norm(text).split(' ').filter(Boolean).map(singular);
+    if (!words.length) return -1;
+    var wordSet = {};
+    words.forEach(function (w) { wordSet[w] = true; });
+    for (var i = 0; i < NAV.tokens.length; i++) {
+      var toks = NAV.tokens[i];
+      for (var j = 0; j < toks.length; j++) {
+        if (wordSet[singular(toks[j])]) return i;
+      }
+    }
+    return -1;
+  }
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('a, button, [role="button"], [data-clickable], li, [class*="card"], [class*="nav"] a, [class*="menu"] a');
+    if (!el) return;
+    var text = (el.innerText || el.textContent || '').trim();
+    if (!text || text.length > 60) return;  // a long blob isn't a nav label
+    var idx = matchScreen(text);
+    if (idx < 0 || idx === NAV.current) return;  // no match, or already here
+    if (window.parent && window.parent.ppShowScreen) {
+      e.preventDefault();
+      e.stopImmediatePropagation();  // beat the "#" link and the safety-net ping
+      window.parent.ppShowScreen(idx);
+    }
+  }, true);
+})();
+</script>
+""" % payload
+
+
 def _extract_screens(gen_data: dict) -> list[dict]:
     """
     Pulls the list of {"title": ..., "html_url": ...} out of the confirmed
@@ -261,18 +372,34 @@ def _combine_screens(screens: list[dict], htmls: list[str]) -> str:
     whatever Stitch generated keeps working exactly as it does when
     opened on its own.
     """
-    def _inject_safety_net(html: str) -> str:
-        if "</body>" in html:
-            return html.replace("</body>", _CLICK_SAFETY_NET_SCRIPT + "</body>", 1)
-        return html + _CLICK_SAFETY_NET_SCRIPT
+    nav_tokens = _screen_nav_tokens([s["title"] for s in screens])
 
-    htmls = [_inject_safety_net(h) for h in htmls]
+    def _inject_scripts(html: str, index: int) -> str:
+        # Order matters: the nav script must be added AFTER the safety-net so
+        # it registers its capture-phase listener first and can call
+        # stopImmediatePropagation before the safety-net's ping fires on a
+        # click it turns into a real screen switch. Single-screen prototypes
+        # get only the safety net — there's nowhere to navigate to.
+        extra = _CLICK_SAFETY_NET_SCRIPT
+        if len(screens) > 1:
+            extra += _build_screen_nav_script(nav_tokens, index)
+        if "</body>" in html:
+            return html.replace("</body>", extra + "</body>", 1)
+        return html + extra
 
     if len(screens) == 1:
-        return htmls[0]
+        return _inject_scripts(htmls[0], 0)
 
     import html as _html_mod  # stdlib html-escaping, only needed here
 
+    htmls = [_inject_scripts(h, i) for i, h in enumerate(htmls)]
+
+    # A discreet corner "Screens" switcher, collapsed by default. In-page
+    # clicks (nav links, buttons, cards) are the primary way to move between
+    # screens now — this is only a fallback so a screen no in-page link
+    # happens to name still stays reachable, and so the whole screen list is
+    # visible at a glance. It sits bottom-right out of the way instead of the
+    # old full-width top tab bar that dominated the prototype.
     nav_buttons = "\n".join(
         f'<button class="pp-tab-btn" onclick="ppShowScreen({i})" id="pp-tab-btn-{i}">{_html_mod.escape(screen["title"])}</button>'
         for i, screen in enumerate(screens)
@@ -290,23 +417,43 @@ def _combine_screens(screens: list[dict], htmls: list[str]) -> str:
 <title>Prototype</title>
 <style>
   html, body {{ margin: 0; padding: 0; height: 100%; background: #0a0c10; }}
-  .pp-tab-bar {{
-    position: sticky; top: 0; z-index: 9999; display: flex; gap: 4px;
-    padding: 10px 16px; background: #0a0c10; border-bottom: 1px solid rgba(255,255,255,0.08);
+  .pp-screen {{ position: absolute; inset: 0; }}
+  .pp-frame {{ width: 100%; height: 100%; border: 0; display: block; }}
+  /* Discreet bottom-right switcher — a small pill that expands on hover to
+     the full screen list. Deliberately unobtrusive: in-page clicks are the
+     intended navigation, this is just a safety net. */
+  .pp-switcher {{
+    position: fixed; bottom: 16px; right: 16px; z-index: 99999;
+    font-family: system-ui, sans-serif;
   }}
+  .pp-switcher-list {{
+    display: none; flex-direction: column; gap: 4px; margin-bottom: 8px;
+    background: rgba(10,12,16,0.95); padding: 8px; border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    max-height: 60vh; overflow: auto;
+  }}
+  .pp-switcher:hover .pp-switcher-list,
+  .pp-switcher.pp-open .pp-switcher-list {{ display: flex; }}
   .pp-tab-btn {{
     background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #e2e2e8;
-    padding: 6px 14px; border-radius: 8px; font-family: system-ui, sans-serif; font-size: 13px;
-    cursor: pointer;
+    padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    text-align: left; white-space: nowrap;
   }}
   .pp-tab-btn.active {{ background: #00e6a8; color: #04140f; border-color: #00e6a8; font-weight: 600; }}
-  .pp-screen {{ height: calc(100vh - 44px); }}
-  .pp-frame {{ width: 100%; height: 100%; border: 0; display: block; }}
+  .pp-switcher-toggle {{
+    background: rgba(0,230,168,0.14); border: 1px solid #00e6a8; color: #00e6a8;
+    padding: 8px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+    backdrop-filter: blur(6px);
+  }}
 </style>
 </head>
 <body>
-<div class="pp-tab-bar">{nav_buttons}</div>
 {frames}
+<div class="pp-switcher" id="pp-switcher" onclick="this.classList.toggle('pp-open')">
+  <div class="pp-switcher-list">{nav_buttons}</div>
+  <button class="pp-switcher-toggle">&#9636; Screens</button>
+</div>
 <script>
 function ppShowScreen(idx) {{
   document.querySelectorAll('.pp-screen').forEach(function(el, i) {{
@@ -315,6 +462,7 @@ function ppShowScreen(idx) {{
   document.querySelectorAll('.pp-tab-btn').forEach(function(el, i) {{
     el.classList.toggle('active', i === idx);
   }});
+  document.getElementById('pp-switcher').classList.remove('pp-open');
 }}
 ppShowScreen(0);
 </script>

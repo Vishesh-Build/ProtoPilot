@@ -37,9 +37,14 @@ Kya karna hai
 
 Baaki main karunga
 ------------------
-Script likhunga jo saare clips Whisper aur Sarvam dono me chalayegi aur
-ek table degi: per-clip accuracy, per-language accuracy, aur time. Tab
-faisla number pe hoga, feeling pe nahi.
+Ho gaya — `backend/scripts/accuracy_benchmark.py` likh diya hai. Clips
+daalke, `reference.csv` bharke, backend folder se ye chalao:
+
+    python scripts/accuracy_benchmark.py
+
+Har clip ka per-clip aur per-language word-error-rate (WER) aur time print
+karega, phir overall summary. `-v` / `--verbose` lagao to har clip ke liye
+engine ne asal me kya suna wo bhi dikhega — expected text ke saamne.
 
 Note: audio files git me nahi jaayengi (bahut badi hoti hain, aur is
-folder me `.gitignore` hai) — sirf `reference.csv` track hoti hai.
+folder me `.gitignore` hai) — sirf `reference.csv` track hoti hai. 

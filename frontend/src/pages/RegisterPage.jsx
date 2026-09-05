@@ -3,7 +3,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, Radio, ShieldCheck,
   Github, Check, Sparkles, Lock as LockIcon, User, X, AlertCircle,
 } from "lucide-react";
-import { authApi } from "../lib/api.js";
+import { authApi, API_BASE_URL } from "../lib/api.js";
 
 /* ============================================================
    ProtoPilot — Register (desktop split layout)
@@ -386,8 +386,20 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
           </div>
 
           <div className="auth-oauth-row">
-            <button className="auth-oauth-btn"><GoogleMark /> Google</button>
-            <button className="auth-oauth-btn"><Github size={15} /> GitHub</button>
+            <button
+              type="button"
+              className="auth-oauth-btn"
+              onClick={() => { window.location.href = `${API_BASE_URL}/auth/google/login`; }}
+            >
+              <GoogleMark /> Google
+            </button>
+            <button
+              type="button"
+              className="auth-oauth-btn"
+              onClick={() => { window.location.href = `${API_BASE_URL}/auth/github/login`; }}
+            >
+              <Github size={15} /> GitHub
+            </button>
           </div>
 
           <div className="auth-footer-text">

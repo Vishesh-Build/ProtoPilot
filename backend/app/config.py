@@ -13,26 +13,130 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # ---- LLM provider keys ----
-    # Fallback order is fixed: NIM -> OpenRouter -> Groq.
-    # A provider with no key configured is skipped automatically.
+    # Fallback order is fixed: Groq -> NIM -> OpenRouter (see app/llm/router.py
+    # for why Groq leads). A provider with no key configured is skipped.
+    #
+    # Each provider takes a COMMA-SEPARATED LIST of model ids, tried in order.
+    # Hosted model ids get retired on a schedule — NIM answered 410 Gone for
+    # meta/llama-3.1-8b-instruct (EOL 2026-08-26) and Groq answered 404 for
+    # llama-3.1-8b-instant (retired 2026-06-17), which killed translation,
+    # requirement extraction and the whole 9-agent pipeline at once. On a
+    # "model gone" reply the provider now asks GET /v1/models what it really
+    # serves and picks a replacement itself, so this list is a preference
+    # order, not a single point of failure.
+    #
+    # Every id below is either already proven to work or was seen in a real
+    # GET /v1/models answer from that provider — none of them is a guess. An
+    # id that turns out to be gone costs one extra round trip at startup and
+    # is then replaced automatically, so the strongest model leads the list
+    # and the fast one sits directly behind it.
     nim_api_key: str | None = None
     nim_base_url: str = "https://integrate.api.nvidia.com/v1"
-    nim_model: str = "meta/llama-3.1-8b-instruct"
+    # openai/gpt-oss-20b leads because NIM's own /v1/models answered with it
+    # on 2026-09-02, while both ids below it had stopped being served — with
+    # them in front, every process start paid a 410 first.
+    nim_models: str = (
+        "openai/gpt-oss-20b,"
+        "meta/llama-3.3-70b-instruct,"
+        "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+    )
 
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_model: str = "meta-llama/llama-3.1-8b-instruct:free"
+    # Left in the order it was already configured in: OpenRouter's free tier
+    # uses a `:free` suffix per id, and inventing a suffixed id nobody has
+    # seen served would be exactly the guess this whole mechanism replaced.
+    # The llama-3.1-8b entry is gone because that family is the one that was
+    # retired underneath us.
+    openrouter_models: str = (
+        "openai/gpt-oss-20b:free,"
+        "meta-llama/llama-3.3-70b-instruct:free"
+    )
 
     groq_api_key: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
-    groq_model: str = "llama-3.1-8b-instant"
+    # gpt-oss-120b is the strongest free model on GroqCloud, so it leads: the
+    # nine agents and the requirement extractor are judged on the quality of
+    # what they write, not on shaving a second off it. gpt-oss-20b sits second
+    # as the fast, higher-throughput fallback — a 429 on 120b is transient, so
+    # the router simply moves on, and NIM serves gpt-oss-20b as well.
+    groq_models: str = (
+        "openai/gpt-oss-120b,"
+        "openai/gpt-oss-20b,"
+        "llama-3.3-70b-versatile"
+    )
+
+    # ---- Google Gemini (optional, but the best free budget available) ----
+    # Groq's free tier is 8000 tokens/MINUTE. The 9-agent pipeline needs
+    # ~25,000 tokens for one full run, so on Groq alone a generation spends
+    # ~3 minutes just waiting for that per-minute budget to refill — which is
+    # exactly the rate limit the live demo hit. Gemini's free tier has a far
+    # larger per-minute token budget, so when a key is set the router leads
+    # with Gemini (see app/llm/router.py) and the whole rate-limit problem
+    # goes away; when it is NOT set this is skipped and the chain is exactly
+    # what it was before (Groq -> NIM -> OpenRouter), so adding this is
+    # zero-risk.
+    #
+    # Get a free key in ~2 min: https://aistudio.google.com/apikey — then put
+    #   GEMINI_API_KEY=your-key-here
+    # in backend/.env and restart the backend. Nothing else to change.
+    #
+    # This talks to Gemini's OpenAI-COMPATIBLE endpoint (…/v1beta/openai), so
+    # it reuses the exact same OpenAICompatibleProvider as Groq/NIM — Bearer
+    # auth, /chat/completions and /models all work unchanged.
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    # gemini-3.6-flash leads: it is Google's own recommended-stable flash
+    # (the successor it names when the retired gemini-2.5-flash 404s) and,
+    # being less bleeding-edge than 3.8, it is the one that reliably answers
+    # 200 rather than 503 "high demand" — checked live 2026-09-04. The newer
+    # gemini-3.8-flash and the gemini-flash-latest alias sit behind it. NOTE
+    # the router only tries a *different* Gemini model on a 404/410 (model
+    # retired) via GET /models rediscovery — a 503 on the lead fails the whole
+    # Gemini provider through to Groq — so the lead must be a reliably-live id,
+    # not merely the newest.
+    gemini_models: str = (
+        "gemini-3.6-flash,"
+        "gemini-3.8-flash,"
+        "gemini-flash-latest"
+    )
 
     # ---- Router behavior ----
-    llm_default_max_tokens: int = 700
+    # 700 was too tight to be safe. gpt-oss and other reasoning models think
+    # in tokens drawn from this same budget, and when it runs out they return
+    # `content: null` with `finish_reason: "length"` — an HTTP 200 carrying no
+    # answer, which is exactly what an empty Points panel looked like from the
+    # outside. This is a ceiling and not a spend, so the headroom is free.
+    llm_default_max_tokens: int = 2048
     llm_default_temperature: float = 0.3
     llm_request_timeout_seconds: float = 30.0
     provider_cooldown_seconds: float = 60.0
     llm_mock_mode: bool = False
+
+    # How long the router may honor a provider's Retry-After during the
+    # GENERATION pipeline, in seconds. The meeting/caption path uses a short
+    # ceiling (LLMRouter._RATE_LIMIT_MAX_WAIT, ~20s) because a caption that
+    # lands half a minute late is useless — but a generation run is expected
+    # to take a minute or two, so there it is fine, and far better, to pay a
+    # provider's honest "wait 24s" than to fail the agent and cascade five
+    # more. The live demo's Groq 429s asked for ~24s and the 20s ceiling
+    # abandoned them; this is why generation gets its own, larger ceiling.
+    # (With a Gemini key set this rarely matters — Gemini's budget means the
+    # pipeline seldom hits a 429 at all — but it makes generation reliable
+    # even on Groq+NIM alone.)
+    llm_generation_max_rate_limit_wait: float = 45.0
+
+    # How many generation-agent LLM calls may be in flight at once. The 9-agent
+    # DAG has a wave that fires concurrent calls (ui + backend share one), and
+    # on a free tier two provider calls landing in the same instant split that
+    # tier's per-minute token budget between them — one wins and the other gets
+    # a 429 or an overload timeout. That is exactly what failed the backend
+    # agent (and everything downstream of it) in the live run, twice, while its
+    # wave-mate ui succeeded. Serialising to 1 gives each agent the whole budget
+    # in turn; the widest wave is two agents, so the cost is one agent's latency,
+    # not real parallelism. Raise this only on a paid tier with headroom for
+    # concurrent calls.
+    llm_generation_concurrency: int = 1
 
     # ---- Stitch (AI UI design tool) ----
     # Get a key from https://stitch.withgoogle.com -> profile -> Stitch
@@ -51,6 +155,40 @@ class Settings(BaseSettings):
     )
 
     # ---- Transcription ----
+    # Which ASR engine to use: "sarvam", "whisper", or "auto".
+    # "auto" (default) means Sarvam when SARVAM_API_KEY is set, local
+    # Whisper otherwise — so adding the key is the only step needed to
+    # switch, and removing it silently falls back instead of breaking.
+    asr_provider: str = "auto"
+
+    # ---- Sarvam AI (cloud ASR, built for Indian languages) ----
+    # Free key from https://dashboard.sarvam.ai. Chosen over local Whisper
+    # for the three languages this project actually needs (Gujarati, Hindi,
+    # English, including code-mixed speech) and because it needs no GPU:
+    # a CPU-only laptop running Whisper "small" took 34-79s per utterance,
+    # which is unusable in a live meeting.
+    sarvam_api_key: str | None = None
+    sarvam_base_url: str = "https://api.sarvam.ai"
+    # saaras:v3 is Sarvam's current recommended model (June 2026): one model,
+    # one endpoint (/speech-to-text), a `mode` parameter picks the behaviour.
+    # Previously this pointed at saaras:v2.5 (a separate /speech-to-text-translate
+    # endpoint) and saarika:v2.5 (below) — both are legacy now, both are
+    # marked "will be deprecated soon" in Sarvam's docs, and v3 is the more
+    # accurate model besides, so this is a straight accuracy + stability
+    # upgrade, not just a version bump.
+    sarvam_model: str = "saaras:v3"
+    # Same v3 model, same /speech-to-text endpoint — asr.py passes
+    # mode="transcribe" here and mode="translate" for sarvam_model above, so
+    # this only needs to be a separate setting in case someone wants to pin
+    # a different model for the original-language pass specifically.
+    sarvam_stt_model: str = "saaras:v3"
+    sarvam_include_original: bool = True
+    sarvam_timeout_seconds: float = 20.0
+    # Sarvam is remote, so slots here are network round trips rather than
+    # CPU cores — several can be in flight at once without contention.
+    max_concurrent_sarvam_requests: int = 6
+
+    # ---- Local Whisper (fallback ASR) ----
     # Model used when a GPU (CUDA) is available — bigger/more accurate,
     # since GPU inference is fast enough to afford it. RTX 2050 (4GB) etc.
     # handle "medium" fine in float16.
@@ -71,6 +209,17 @@ class Settings(BaseSettings):
     # GPU is fast enough to afford better accuracy without added lag).
     whisper_beam_size: int = 1
     whisper_gpu_beam_size: int = 5
+    # Whisper auto-detect picks from ~99 languages, and on a short noisy
+    # utterance from the CPU "small" model that guess is close to random:
+    # a real meeting log had English speech detected as Telugu at 0.68
+    # confidence, then hi/en/gu all at ~0.32, and every one of those lines
+    # came back as gibberish. Restricting the choice to the languages this
+    # project actually supports makes a Telugu/Urdu/Marathi misfire
+    # structurally impossible. Set to "" to allow all languages again.
+    whisper_allowed_languages: str = "en,hi,gu"
+    # 0 = let ctranslate2 use every core. Fine when one transcription runs
+    # at a time; see max_concurrent_transcriptions_cpu below.
+    whisper_cpu_threads: int = 0
 
     # ============================================================
     # ---- Auth / Users (cloud) ----
@@ -78,6 +227,23 @@ class Settings(BaseSettings):
     # Async SQLAlchemy URL, e.g. for a free Neon Postgres project:
     #   postgresql+asyncpg://user:password@ep-xxxx.neon.tech/protopilot?ssl=require
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/protopilot"
+
+    # Where meeting state (transcript, requirements, agent outputs) lives:
+    #   "sqlite"   -> a local file at meeting_store_path (default; local dev)
+    #   "postgres" -> the same managed Postgres as the auth DB (database_url)
+    # A cloud host with an ephemeral disk (Render/Fly free tiers) wipes the
+    # SQLite file on every deploy/restart, losing every meeting and its
+    # generated prototype. Setting MEETING_STORE_BACKEND=postgres there puts
+    # meeting state in Neon alongside auth, so it survives redeploys. Local
+    # dev leaves this as "sqlite" and nothing changes.
+    meeting_store_backend: str = "sqlite"
+
+    # Local SQLite file holding meeting state (used when meeting_store_backend
+    # is "sqlite"). Survives backend restarts on a persistent disk — the
+    # in-memory dict used before lost everything on a restart, taking the
+    # generated prototype with it. Relative paths resolve against the backend
+    # working dir.
+    meeting_store_path: str = "./protopilot_meetings.db"
 
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"
     jwt_secret_key: str = "CHANGE-ME-in-.env-generate-a-real-64-byte-secret"
@@ -91,6 +257,12 @@ class Settings(BaseSettings):
     # for local http:// testing.
     cookie_secure: bool = True
     cookie_domain: str | None = None  # e.g. ".protopilot.app" — leave None for local testing
+
+    # Extra CORS origins, comma-separated. The Electron app serves its UI from
+    # http://localhost:5173 (dev + packaged), which is already allowed; this
+    # is for any additional frontend hosts (e.g. a deployed web build) that
+    # should reach this backend.
+    extra_cors_origins: str = ""
 
     # ---- Outbound email (forgot-password links) ----
     # Any standard SMTP provider works (Gmail app password, Resend, SendGrid
@@ -143,10 +315,16 @@ class Settings(BaseSettings):
     # How many participant utterances can be transcribed at once, across ALL
     # active meetings — keeps a burst of simultaneous speakers from saturating
     # the machine; extras queue instead of piling on at once.
-    # At 2, a 3-4 person meeting spent real time just waiting for a slot, and
-    # that wait is invisible in the logs because it happens before Whisper is
-    # even called. Raise further only if the box can take it.
+    #
+    # This value applies on GPU only. On CPU the limit is forced to
+    # max_concurrent_transcriptions_cpu regardless of what is set here,
+    # because ctranslate2 already parallelises one transcription across every
+    # core: running two at once does not double throughput, it makes both
+    # slower. A real meeting log showed 5.28s of audio taking 34.92s and the
+    # queue wait snowballing to 170.83s, for a worst-case caption 195.97s
+    # after the words were spoken. One at a time on CPU is genuinely faster.
     max_concurrent_transcriptions: int = 4
+    max_concurrent_transcriptions_cpu: int = 1
 
 
 settings = Settings()

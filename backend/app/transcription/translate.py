@@ -1,12 +1,18 @@
 """
 Translates transcript text to English using the same LLM router every
-agent uses (NIM -> OpenRouter -> Groq). Kept as a separate, tiny function
+agent uses (Groq -> NIM -> OpenRouter). Kept as a separate, tiny function
 so the prompt and token budget for this specific job stay easy to tune.
+
+Note: when Sarvam is the active ASR provider it already returns English
+(speech-to-text-translate), so this module is skipped entirely on that
+path — see app/transcription/asr.py. It still runs for every utterance
+transcribed locally by Whisper.
 """
 
 import logging
 import re
 
+from app.config import settings
 from app.llm.router import llm_router
 
 logger = logging.getLogger("protopilot.translate")
@@ -59,7 +65,17 @@ async def translate_to_english(text: str, source_language: str) -> str:
                 {"role": "system", "content": system},
                 {"role": "user", "content": text},
             ],
-            max_tokens=min(300, len(text.split()) * 3 + 40),
+            # Sized for the ANSWER only — which is what a tight ceiling here
+            # used to assume. Reasoning models (gpt-oss on Groq and NIM, which
+            # is what the router picks today) spend this same budget thinking
+            # before they emit a single visible character, so a one-line Hindi
+            # caption came back with 281 characters of reasoning, no answer and
+            # finish_reason=length. That failed BOTH providers, put them in
+            # cooldown, and the next requirement extraction then reported
+            # "no provider has an API key" for a session with two live keys.
+            # The floor covers the thinking; the per-word term still keeps a
+            # long utterance from being truncated.
+            max_tokens=max(settings.llm_default_max_tokens, len(text.split()) * 6 + 200),
             temperature=0.1,
         )
         return result.text.strip()

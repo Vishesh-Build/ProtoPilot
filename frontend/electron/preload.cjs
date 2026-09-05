@@ -13,9 +13,16 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Resolved once in the main process (see main.cjs: env var, then the
+// user's saved config, then the localhost default) and handed to the
+// renderer here. The renderer never reads process.env itself — it's
+// sandboxed, and in a packaged build Vite has already baked
+// import.meta.env values in, so this is the only runtime-configurable
+// path for the packaged app.
 contextBridge.exposeInMainWorld("protopilotDesktop", {
   isDesktop: true,
   platform: process.platform,
+  apiBaseUrl: ipcRenderer.sendSync("protopilot:get-api-base-url"),
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,

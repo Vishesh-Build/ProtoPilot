@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   Copy, PhoneOff, X, Check, Zap, Settings, Smile, Send, Sparkles, Loader2, AlertCircle,
-  Pencil,
+  Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock,
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { meetingsApi, ApiError } from "../lib/api.js";
@@ -93,6 +93,26 @@ const styles = `
   .lmc-pill-btn:hover { transform: scale(1.06); filter: brightness(1.08); }
 
   .lmc-topbar { padding-bottom: 14px; border-bottom: 1px solid #F1F2F7; }
+
+  /* Host-only page nav strip */
+  .lmc-navtabs {
+    flex-shrink: 0; display: flex; gap: 6px; flex-wrap: wrap;
+    padding: 10px 0 12px; border-bottom: 1px solid #F1F2F7;
+  }
+  .lmc-navtab {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border-radius: 999px;
+    font-family: inherit; font-size: 11.5px; font-weight: 650; letter-spacing: -0.01em;
+    color: #5B5F70; background: #F4F5F8; border: 1px solid transparent;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .lmc-navtab:not(.active):not(.locked):hover { background: #ECEEF4; color: #24252C; transform: translateY(-1px); }
+  .lmc-navtab.active {
+    background: linear-gradient(135deg, #14151B, #2A2C38); color: #fff;
+    cursor: default; box-shadow: 0 4px 12px rgba(20,21,27,0.18);
+  }
+  .lmc-navtab.locked { color: #B0B3C0; background: #F6F7F9; cursor: not-allowed; }
+  .lmc-navtab-lock { margin-left: 1px; opacity: 0.75; }
 
   .lmc-body {
     display: grid;
@@ -332,6 +352,20 @@ const styles = `
   .lmc-points-count { font-size: 10.5px; color: #9A9EB0; text-align: right; }
 
   .lmc-host-only-note { font-size: 10.5px; color: #9A9EB0; text-align: center; margin-top: 6px; }
+
+  .lmc-add-point-row {
+    display: flex; align-items: center; gap: 6px;
+    background: #F2F3F6; border: 1px solid #E7E8EE; border-radius: 999px;
+    padding: 4px 4px 4px 14px;
+  }
+  .lmc-add-point-row:focus-within { border-color: #4A63E8; background: #fff; }
+  .lmc-add-point-btn {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    background: #4A63E8; color: #fff; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;
+  }
+  .lmc-add-point-btn:hover:not(:disabled) { background: #3A52D8; transform: scale(1.06); }
+  .lmc-add-point-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
 /* ---------------- small helper components ---------------- */
@@ -378,6 +412,9 @@ export default function LiveMeetingCall({
   onHangUp,
   onBack,
   onGeneratePrototype,
+  onViewPrototype,
+  onOpenWorkforce,
+  onOpenPipeline,
 }) {
   const [tab, setTab] = useState("points");
   const [message, setMessage] = useState("");
@@ -385,6 +422,13 @@ export default function LiveMeetingCall({
   const [editingPointId, setEditingPointId] = useState(null);
   const [editDraft, setEditDraft] = useState("");
   const [generating, setGenerating] = useState(false);
+  // True once this meeting has a built prototype — flips the footer from a
+  // single "Generate" to "View Prototype" + "Regenerate", so the host can show
+  // the client the already-built prototype without kicking off another build.
+  const [prototypeReady, setPrototypeReady] = useState(false);
+  // Host-typed "we missed one" requirement (added straight as approved).
+  const [newPointText, setNewPointText] = useState("");
+  const [addingPoint, setAddingPoint] = useState(false);
 
   const [connectionState, setConnectionState] = useState("connecting"); // connecting | connected | error
   const [connectionError, setConnectionError] = useState("");
@@ -671,6 +715,18 @@ export default function LiveMeetingCall({
       .catch(() => {});
   }, [meetingId, connectionState]);
 
+  // Does this meeting already have a built prototype? Decides whether the
+  // footer offers "View Prototype" + "Regenerate" or a plain "Generate".
+  // Re-checked on every (re)connect, so returning from a build shows the new
+  // state without a manual refresh.
+  useEffect(() => {
+    if (!meetingId || connectionState !== "connected") return;
+    meetingsApi
+      .get(meetingId)
+      .then((s) => setPrototypeReady(Boolean(s.has_prototype)))
+      .catch(() => {});
+  }, [meetingId, connectionState]);
+
   /* ---------- Controls ---------- */
 
   const toggleMic = async () => {
@@ -768,6 +824,29 @@ export default function LiveMeetingCall({
     }
   };
 
+  // Host manually adds a requirement that was missed — persisted straight as
+  // approved, so the next Regenerate folds it into the already-built prototype.
+  const addManualPoint = async () => {
+    const title = newPointText.trim();
+    if (!isHost || !title || addingPoint) return;
+    setAddingPoint(true);
+    try {
+      const { requirement } = await meetingsApi.addRequirement(meetingId, title);
+      setPoints((prev) =>
+        prev.some((p) => p.id === requirement.id)
+          ? prev
+          : [...prev, { id: requirement.id, text: requirement.title, status: requirement.status }],
+      );
+      setNewPointText("");
+    } catch (err) {
+      // 409 = already captured (by the extractor or an earlier add). Leave the
+      // text in place so the host sees it didn't take.
+      console.warn("Couldn't add requirement:", err.message);
+    } finally {
+      setAddingPoint(false);
+    }
+  };
+
   const acceptedCount = points.filter((p) => p.status === "approved").length;
   const canGenerate = acceptedCount > 0 && !generating;
 
@@ -823,6 +902,38 @@ export default function LiveMeetingCall({
               </div>
             </div>
           </div>
+
+          {/* ---------- Host-only page nav: locked until the prototype exists ----------
+              Only the meeting's creator sees this. AI Workforce / Pipeline / Prototype
+              stay locked until a prototype has actually been generated, so nobody opens
+              an empty screen. Clients don't need it — the host shows the built prototype
+              over screen-share. */}
+          {isHost && (
+            <div className="lmc-navtabs">
+              {[
+                { key: "meeting", label: "Meeting", icon: Radio, active: true },
+                { key: "workforce", label: "AI Workforce", icon: Cpu, onClick: onOpenWorkforce },
+                { key: "pipeline", label: "Pipeline", icon: GitBranch, onClick: onOpenPipeline },
+                { key: "prototype", label: "Prototype", icon: Eye, onClick: onViewPrototype },
+              ].map((t) => {
+                const locked = !t.active && !prototypeReady;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    className={`lmc-navtab ${t.active ? "active" : ""} ${locked ? "locked" : ""}`}
+                    disabled={t.active || locked}
+                    onClick={() => { if (!t.active && !locked) t.onClick?.(); }}
+                    title={locked ? "Unlocks once you generate the prototype" : t.label}
+                  >
+                    <t.icon size={13} />
+                    <span>{t.label}</span>
+                    {locked && <Lock size={11} className="lmc-navtab-lock" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* ---------- Body: video + side panel ---------- */}
           <div className="lmc-body">
@@ -1015,12 +1126,53 @@ export default function LiveMeetingCall({
                   </div>
 
                   <div className="lmc-points-footer">
+                    {isHost && (
+                      <div className="lmc-add-point-row">
+                        <input
+                          value={newPointText}
+                          onChange={(e) => setNewPointText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") addManualPoint(); }}
+                          placeholder="Add a missed requirement…"
+                          style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 12, color: "#24252C" }}
+                        />
+                        <button
+                          className="lmc-add-point-btn"
+                          onClick={addManualPoint}
+                          disabled={!newPointText.trim() || addingPoint}
+                          title="Add this as an approved requirement"
+                        >
+                          {addingPoint ? <Loader2 size={13} className="lmc-spin" /> : <Plus size={14} strokeWidth={2.5} />}
+                        </button>
+                      </div>
+                    )}
                     <div className="lmc-points-count">{acceptedCount} of {points.length} accepted</div>
                     {isHost ? (
-                      <button className="lmc-generate-btn" disabled={!canGenerate} onClick={handleGenerate}>
-                        <Sparkles size={14} />
-                        {generating ? "Generating…" : "Generate Prototype"}
-                      </button>
+                      prototypeReady ? (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button
+                            className="lmc-generate-btn"
+                            style={{ background: "#14151B", boxShadow: "none", flex: 1 }}
+                            onClick={() => onViewPrototype?.()}
+                            title="Show the client the prototype that's already built — no re-generation"
+                          >
+                            <Eye size={14} /> View Prototype
+                          </button>
+                          <button
+                            className="lmc-generate-btn"
+                            style={{ flex: 1 }}
+                            disabled={!canGenerate}
+                            onClick={handleGenerate}
+                            title="Rebuild, folding in any requirements approved since the last build"
+                          >
+                            <Sparkles size={14} /> {generating ? "Regenerating…" : "Regenerate"}
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="lmc-generate-btn" disabled={!canGenerate} onClick={handleGenerate}>
+                          <Sparkles size={14} />
+                          {generating ? "Generating…" : "Generate Prototype"}
+                        </button>
+                      )
                     ) : (
                       <div className="lmc-host-only-note">Only the host can generate the prototype</div>
                     )}

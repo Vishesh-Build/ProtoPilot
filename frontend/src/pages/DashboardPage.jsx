@@ -3,7 +3,7 @@ import {
   Radio, Plus, Mic, Play, Clock, ArrowRight, ChevronRight,
   LayoutDashboard, Users, Cpu, GitBranch, Eye,
   Settings, Bell, Command, CheckCircle2, Loader2, FileClock,
-  Sparkles, Zap, Layers, TrendingUp, AlertCircle, LogIn, X,
+  Sparkles, Zap, Layers, TrendingUp, AlertCircle, LogIn, X, Trash2, Pencil,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
 import { meetingsApi } from "../lib/api.js";
@@ -126,6 +126,10 @@ const styles = `
   .db-status-badge.processing { color: #B8860B; background: #FFF6E0; }
   .db-status-badge.draft { color: #767A8C; background: #F2F3F6; }
   .db-resume-btn { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: #4A63E8; background: #EFF2FF; border: none; border-radius: 999px; padding: 7px 12px; cursor: pointer; flex-shrink: 0; }
+  .db-delete-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: #9599AA; background: transparent; border: 1px solid rgba(236,238,245,0.9); border-radius: 999px; cursor: pointer; flex-shrink: 0; transition: all 0.15s ease; }
+  .db-delete-btn:hover { color: #C0392B; background: #FDECEA; border-color: #F5C6CB; }
+  .db-rename-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: #9599AA; background: transparent; border: 1px solid rgba(236,238,245,0.9); border-radius: 999px; cursor: pointer; flex-shrink: 0; transition: all 0.15s ease; }
+  .db-rename-btn:hover { color: #4A63E8; background: #EFF2FF; border-color: #C7D0F5; }
 
   .db-side-card { background: rgba(255,255,255,0.75); backdrop-filter: blur(14px); border: 1px solid rgba(236,238,245,0.9); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
   .db-side-title { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; margin-bottom: 12px; }
@@ -176,6 +180,8 @@ const styles = `
     font-weight: 700; cursor: pointer;
   }
   .db-modal-submit:disabled { opacity: 0.6; cursor: default; }
+  .db-modal-danger { background: #C0392B; }
+  .db-modal-danger:hover:not(:disabled) { background: #A93226; }
 `;
 
 const NAV_TABS = [
@@ -212,6 +218,21 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinError, setJoinError] = useState(null);
 
+  // Delete-a-meeting confirm flow. Deletion is permanent (the backend wipes the
+  // transcript, requirements and generated prototype), so it always goes through
+  // this confirm modal — never a one-click removal.
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  // Rename-a-meeting flow. The default name is a timestamp ("Meeting on …"),
+  // so letting the host give it a real title is what makes the history list
+  // actually readable later.
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState(null);
+
   const handleJoinSubmit = async () => {
     const id = joinId.trim();
     if (!id) return;
@@ -229,6 +250,44 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
       );
     } finally {
       setJoinBusy(false);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await meetingsApi.delete(deleteTarget.meeting_id);
+      // Drop it from local state — recentMeetings and recentPrototypes both
+      // derive from `meetings`, so both lists update at once.
+      setMeetings((prev) => prev.filter((m) => m.meeting_id !== deleteTarget.meeting_id));
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err?.message || "Couldn't delete that meeting.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const handleRenameConfirm = async () => {
+    if (!renameTarget) return;
+    const name = renameValue.trim();
+    if (!name) return;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      const updated = await meetingsApi.rename(renameTarget.meeting_id, name);
+      // Patch the one row in place — keep every other field the backend
+      // returned so the meta line (readiness, prototype badge) stays correct.
+      setMeetings((prev) =>
+        prev.map((m) => (m.meeting_id === renameTarget.meeting_id ? { ...m, ...updated } : m))
+      );
+      setRenameTarget(null);
+    } catch (err) {
+      setRenameError(err?.message || "Couldn't rename that meeting.");
+    } finally {
+      setRenameBusy(false);
     }
   };
 
@@ -393,6 +452,20 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
                     <button className="db-resume-btn" onClick={() => onResumeMeeting?.(m.meeting_id)}>
                       <Play size={12} /> Resume
                     </button>
+                    <button
+                      className="db-rename-btn"
+                      title="Rename this meeting"
+                      onClick={() => { setRenameError(null); setRenameValue(m.name); setRenameTarget(m); }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      className="db-delete-btn"
+                      title="Delete this meeting permanently"
+                      onClick={() => { setDeleteError(null); setDeleteTarget(m); }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -458,6 +531,58 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
             <button className="db-modal-submit" disabled={joinBusy || !joinId.trim()} onClick={handleJoinSubmit}>
               {joinBusy ? <Loader2 size={14} className="wf-spin" /> : <LogIn size={14} />}
               {joinBusy ? "Joining…" : "Join meeting"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="db-modal-overlay" onClick={() => !deleteBusy && setDeleteTarget(null)}>
+          <div className="db-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="db-modal-head">
+              <div className="db-modal-title">Delete this meeting?</div>
+              <X size={16} className="db-modal-close" onClick={() => !deleteBusy && setDeleteTarget(null)} />
+            </div>
+            <p className="db-modal-sub">
+              <b>{deleteTarget.name}</b> and everything in it — the transcript, every
+              captured requirement, and the generated prototype — will be permanently
+              deleted. This can't be undone.
+            </p>
+            {deleteError && <div className="db-modal-error">{deleteError}</div>}
+            <button className="db-modal-submit db-modal-danger" disabled={deleteBusy} onClick={handleDeleteConfirm}>
+              {deleteBusy ? <Loader2 size={14} className="wf-spin" /> : <Trash2 size={14} />}
+              {deleteBusy ? "Deleting…" : "Delete permanently"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {renameTarget && (
+        <div className="db-modal-overlay" onClick={() => !renameBusy && setRenameTarget(null)}>
+          <div className="db-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="db-modal-head">
+              <div className="db-modal-title">Rename meeting</div>
+              <X size={16} className="db-modal-close" onClick={() => !renameBusy && setRenameTarget(null)} />
+            </div>
+            <p className="db-modal-sub">
+              Give this meeting a name you'll recognise later in your history.
+            </p>
+            <input
+              className="db-modal-input"
+              placeholder="e.g. Restaurant app kickoff"
+              value={renameValue}
+              autoFocus
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleRenameConfirm()}
+            />
+            {renameError && <div className="db-modal-error">{renameError}</div>}
+            <button
+              className="db-modal-submit"
+              disabled={renameBusy || !renameValue.trim() || renameValue.trim() === renameTarget.name}
+              onClick={handleRenameConfirm}
+            >
+              {renameBusy ? <Loader2 size={14} className="wf-spin" /> : <Pencil size={14} />}
+              {renameBusy ? "Saving…" : "Save name"}
             </button>
           </div>
         </div>

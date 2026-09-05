@@ -23,10 +23,15 @@ rest of the process and retries that one utterance, so a live meeting
 never just stops transcribing — worst case it gets quietly slower after
 one failed utterance instead of breaking entirely.
 
-Language detection is automatic: faster-whisper detects the spoken
-language per segment when `language=None` is passed. This is what
-lets a single meeting move between English, Hindi, and Gujarati
-without any manual toggle.
+Language handling: Whisper's own auto-detect chooses from ~99
+languages, and on a short noisy utterance from the CPU "small" model
+that choice is close to a coin flip — a real meeting log had English
+speech detected as Telugu at 0.68 confidence, and Hindi/English/Gujarati
+sitting at ~0.32 each on lines that came back as gibberish. So detection
+now runs as its own cheap pass and the winner is picked from
+settings.whisper_allowed_languages ("en,hi,gu") instead of the full set,
+which makes a Telugu/Urdu/Marathi misfire structurally impossible. Set
+that setting to "" to restore plain auto-detect.
 """
 
 import asyncio
@@ -39,12 +44,25 @@ import numpy as np
 
 # On Windows, pip-installed nvidia-cublas-cu12 / nvidia-cudnn-cu12 wheels
 # place their DLLs under site-packages\nvidia\<pkg>\bin\, which isn't on
-# the system PATH by default — ctranslate2 (which faster-whisper uses
-# under the hood) can't find cublas64_12.dll / cudnn64_9.dll without
-# this. (Confirmed path layout — Windows wheels use \bin\, not \lib\
-# like the Linux wheels do.) If you installed CUDA Toolkit + cuDNN
-# system-wide instead and they're already on PATH, this whole block is
-# a harmless no-op.
+# the system PATH by default. There are TWO different mechanisms at play,
+# and BOTH are needed:
+#
+#   1. os.add_dll_directory() — covers DLLs that Python/ctypes loads
+#      directly.
+#   2. os.environ["PATH"] — ctranslate2's native code resolves its
+#      dependencies (cublas64_12.dll, cudnn64_9.dll) via the standard
+#      LoadLibrary search path. add_dll_directory() does NOT affect that
+#      search, which is exactly why a model could LOAD on CUDA (loading
+#      needs no cuBLAS) and then FAIL at the first transcribe() call with
+#      "Library cublas64_12.dll is not found or cannot be loaded" —
+#      verified live on this machine before this fix.
+#
+# Both must run BEFORE faster_whisper (and therefore ctranslate2) is
+# imported, because ctranslate2 resolves its import-time dependencies
+# through the same search. (Confirmed path layout — Windows wheels use
+# \bin\, not \lib\ like the Linux wheels do.) If you installed CUDA
+# Toolkit + cuDNN system-wide and they're already on PATH, this whole
+# block is a harmless no-op.
 if sys.platform == "win32":
     for _pkg_name in ("nvidia.cublas", "nvidia.cuda_nvrtc", "nvidia.cudnn"):
         try:
@@ -52,6 +70,10 @@ if sys.platform == "win32":
             _bin_dir = os.path.join(_pkg.__path__[0], "bin")
             if os.path.isdir(_bin_dir):
                 os.add_dll_directory(_bin_dir)
+                # Prepend so the pip wheels' DLLs win over any stale
+                # system CUDA that might also be on PATH.
+                if _bin_dir not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = _bin_dir + os.pathsep + os.environ.get("PATH", "")
         except ImportError:
             pass  # that particular nvidia-*-cu12 package isn't installed — CPU fallback below handles it
 
@@ -75,6 +97,31 @@ _active_device: str | None = None
 _cuda_runtime_broken = False
 
 
+def _cuda_warmup_transcribe(model: WhisperModel) -> None:
+    """
+    Runs one tiny real transcribe() on the freshly-loaded CUDA model.
+
+    This is the fix for the "CUDA loads fine, then dies at the first real
+    caption" trap: loading the model needs no cuBLAS/cuDNN, so a broken
+    CUDA runtime only reveals itself when the first utterance's encoder
+    pass calls into it — by which point the meeting is live and the line
+    the user is watching pays the cost (fallback CPU retry + 10x latency
+    on that one utterance). A 0.2s silent clip here surfaces the same
+    failure at load time instead, in well under a second.
+
+    Raises whatever the real transcribe would — the caller treats that as
+    "CUDA load failed" and falls back to CPU, loudly and up front.
+    """
+    import numpy as np
+
+    silent = np.zeros(3200, dtype=np.float32)  # 0.2s of 16kHz silence
+    segments, _info = model.transcribe(
+        silent, vad_filter=False, beam_size=1, condition_on_previous_text=False
+    )
+    for _ in segments:  # force the generator to actually run
+        pass
+
+
 def _load_model_blocking(force_cpu: bool = False) -> tuple[WhisperModel, str]:
     """
     Runs on a worker thread (model loading is blocking). Tries CUDA first
@@ -83,6 +130,10 @@ def _load_model_blocking(force_cpu: bool = False) -> tuple[WhisperModel, str]:
     install, no GPU present, or the GPU running out of memory for this
     model size are all treated the same way: log it and fall back, never
     crash the app over it.
+
+    "Any failure" includes the warmup: a model that loads but can't run
+    one real transcribe is NOT a working CUDA model, and handing it to a
+    live meeting is how a caption ends up 10x slower than it should be.
     """
     if not force_cpu:
         try:
@@ -95,11 +146,12 @@ def _load_model_blocking(force_cpu: bool = False) -> tuple[WhisperModel, str]:
                 device="cuda",
                 compute_type=settings.whisper_gpu_compute_type,
             )
-            logger.info("faster-whisper: using CUDA (model=%s)", settings.whisper_model_size)
+            _cuda_warmup_transcribe(model)
+            logger.info("faster-whisper: using CUDA (model=%s, warmup ok)", settings.whisper_model_size)
             return model, "cuda"
-        except Exception as e:  # noqa: BLE001 — any GPU failure (no CUDA, OOM, driver) falls back to CPU
+        except Exception as e:  # noqa: BLE001 — load OR warmup failure: fall back to CPU
             logger.warning(
-                "faster-whisper: CUDA load failed (%s) — falling back to CPU with model=%s",
+                "faster-whisper: CUDA unavailable (%s) — falling back to CPU with model=%s",
                 e, settings.whisper_cpu_fallback_model_size,
             )
 
@@ -107,8 +159,16 @@ def _load_model_blocking(force_cpu: bool = False) -> tuple[WhisperModel, str]:
         settings.whisper_cpu_fallback_model_size,
         device="cpu",
         compute_type=settings.whisper_compute_type,
+        cpu_threads=settings.whisper_cpu_threads,
     )
-    logger.info("faster-whisper: using CPU (model=%s)", settings.whisper_cpu_fallback_model_size)
+    logger.warning(
+        "faster-whisper: using CPU (model=%s). Expect several seconds per utterance — "
+        "CPU transcription of Hindi/Gujarati is the slowest and least accurate path this "
+        "project has. Set SARVAM_API_KEY to move transcription off this machine entirely, "
+        "or fix CUDA (pip install nvidia-cublas-cu12 nvidia-cudnn-cu12) to use the "
+        "'%s' model on the GPU instead.",
+        settings.whisper_cpu_fallback_model_size, settings.whisper_model_size,
+    )
     return model, "cpu"
 
 
@@ -120,6 +180,22 @@ async def get_model() -> WhisperModel:
                 # Model loading is CPU/IO-bound and blocking — run off the event loop.
                 _model, _active_device = await asyncio.to_thread(_load_model_blocking, _cuda_runtime_broken)
     return _model
+
+
+async def ensure_model_loaded() -> str:
+    """
+    Loads the model if it isn't loaded yet and returns the device actually
+    in use ("cuda" or "cpu"). Anything that needs to size a concurrency
+    limit has to await this first, because the correct limit depends
+    entirely on the answer — see app/livekit/transcription_bot.py.
+    """
+    await get_model()
+    return _active_device or "cpu"
+
+
+def active_device() -> str | None:
+    """Device in use, or None if no model has been loaded yet."""
+    return _active_device
 
 
 async def _fall_back_to_cpu() -> WhisperModel:
@@ -153,14 +229,82 @@ class TranscriptResult:
         self.language_probability = language_probability
 
 
+def allowed_languages() -> list[str]:
+    return [c.strip().lower() for c in settings.whisper_allowed_languages.split(",") if c.strip()]
+
+
+def pick_allowed_language(
+    all_language_probs, allowed: list[str]
+) -> tuple[str, float] | None:
+    """
+    Given faster-whisper's ranked [(code, probability), ...] list, return the
+    highest-probability language that ProtoPilot actually supports.
+
+    Returns None when the allow-list is empty or none of its languages show
+    up at all — the caller then leaves plain auto-detect in place rather
+    than forcing a language the audio clearly isn't.
+    """
+    if not allowed or not all_language_probs:
+        return None
+    allowed_set = set(allowed)
+    best: tuple[str, float] | None = None
+    for entry in all_language_probs:
+        try:
+            code = str(entry[0]).lower()
+            probability = float(entry[1])
+        except (TypeError, IndexError, ValueError):
+            continue
+        if code in allowed_set and (best is None or probability > best[1]):
+            best = (code, probability)
+    return best
+
+
+def _detect_allowed_language(model: WhisperModel, audio: np.ndarray, device: str):
+    """
+    One cheap detection pass, constrained to the supported languages. Costs
+    an extra encoder run, which is far less than a full decode wasted on a
+    language nobody in the meeting is speaking.
+    """
+    allowed = allowed_languages()
+    if not allowed:
+        return None
+    detect = getattr(model, "detect_language", None)
+    if detect is None:
+        return None  # older faster-whisper — plain auto-detect still works
+    try:
+        detection = detect(audio)
+    except Exception as e:  # noqa: BLE001 — detection is an optimisation, never fatal
+        logger.warning(
+            "whisper[%s]: language detection pass failed (%s) — falling back to auto-detect", device, e
+        )
+        return None
+    all_probs = detection[2] if isinstance(detection, tuple) and len(detection) > 2 else None
+    chosen = pick_allowed_language(all_probs, allowed)
+    if chosen is None:
+        top = detection[0] if isinstance(detection, tuple) and detection else "?"
+        logger.warning(
+            "whisper[%s]: detector's best guess (%s) is not in %s and no supported language "
+            "scored at all — letting Whisper auto-detect this one",
+            device, top, ",".join(allowed),
+        )
+    return chosen
+
+
 def _run_transcribe(model: WhisperModel, audio: np.ndarray, device: str) -> tuple[str, str, float]:
     t0 = time.monotonic()
     beam_size = settings.whisper_gpu_beam_size if device == "cuda" else settings.whisper_beam_size
+    forced = _detect_allowed_language(model, audio, device)
     segments, info = model.transcribe(
         audio,
-        language=None,  # auto-detect — this is the important part
+        # Either a language from the supported set, or None to let Whisper
+        # decide when detection couldn't produce a supported one.
+        language=forced[0] if forced else None,
         vad_filter=True,  # trims leading/trailing silence
         beam_size=beam_size,
+        # Each utterance is an independent clip here, so carrying decoded
+        # text forward between segments buys nothing and is a known cause of
+        # repetition loops on short, noisy input.
+        condition_on_previous_text=False,
         # Nudges Whisper to recognize common software/requirements
         # terms correctly even when they're spoken mid-sentence in
         # Hindi or Gujarati (code-switching is where ASR tends to
@@ -172,12 +316,14 @@ def _run_transcribe(model: WhisperModel, audio: np.ndarray, device: str) -> tupl
         ),
     )
     text = " ".join(seg.text.strip() for seg in segments).strip()
+    language, probability = forced if forced else (info.language, info.language_probability)
     elapsed = time.monotonic() - t0
     logger.info(
-        "whisper[%s]: transcribed %.2fs of audio in %.2fs (beam_size=%d)",
-        device, len(audio) / _EXPECTED_SAMPLE_RATE, elapsed, beam_size,
+        "whisper[%s]: transcribed %.2fs of audio in %.2fs (beam_size=%d, lang=%s%s)",
+        device, len(audio) / _EXPECTED_SAMPLE_RATE, elapsed, beam_size, language,
+        " forced" if forced else " auto",
     )
-    return text, info.language, info.language_probability
+    return text, language, probability
 
 
 async def transcribe_utterance(raw_pcm16: bytes) -> TranscriptResult:

@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Prototype</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0c10; }
+  .pp-screen { position: absolute; inset: 0; }
+  .pp-frame { width: 100%; height: 100%; border: 0; display: block; }
+  /* Discreet bottom-right switcher — a small pill that expands on hover to
+     the full screen list. Deliberately unobtrusive: in-page clicks are the
+     intended navigation, this is just a safety net. */
+  .pp-switcher {
+    position: fixed; bottom: 16px; right: 16px; z-index: 99999;
+    font-family: system-ui, sans-serif;
+  }
+  .pp-switcher-list {
+    display: none; flex-direction: column; gap: 4px; margin-bottom: 8px;
+    background: rgba(10,12,16,0.95); padding: 8px; border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    max-height: 60vh; overflow: auto;
+  }
+  .pp-switcher:hover .pp-switcher-list,
+  .pp-switcher.pp-open .pp-switcher-list { display: flex; }
+  .pp-tab-btn {
+    background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #e2e2e8;
+    padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    text-align: left; white-space: nowrap;
+  }
+  .pp-tab-btn.active { background: #00e6a8; color: #04140f; border-color: #00e6a8; font-weight: 600; }
+  .pp-switcher-toggle {
+    background: rgba(0,230,168,0.14); border: 1px solid #00e6a8; color: #00e6a8;
+    padding: 8px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
+    backdrop-filter: blur(6px);
+  }
+</style>
+</head>
+<body>
+<div class="pp-screen" id="pp-screen-0" style="display:block"><iframe class="pp-frame" srcdoc="&lt;!DOCTYPE html&gt;
+
+&lt;html class=&quot;light&quot; lang=&quot;en&quot;&gt;&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;/&gt;
+&lt;meta content=&quot;width=device-width, initial-scale=1.0&quot; name=&quot;viewport&quot;/&gt;
+&lt;title&gt;DineFlow - Restaurant Admin Dashboard&lt;/title&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com&quot; rel=&quot;preconnect&quot;/&gt;
+&lt;link crossorigin=&quot;&quot; href=&quot;https://fonts.gstatic.com&quot; rel=&quot;preconnect&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;amp;family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;script src=&quot;https://cdn.tailwindcss.com?plugins=forms,container-queries&quot;&gt;&lt;/script&gt;
+&lt;script id=&quot;tailwind-config&quot;&gt;
+        tailwind.config = {
+            darkMode: &quot;class&quot;,
+            theme: {
+                extend: {
+                    &quot;colors&quot;: {
+                        &quot;primary-container&quot;: &quot;#ff7043&quot;,
+                        &quot;primary&quot;: &quot;#ac3509&quot;,
+                        &quot;on-primary-container&quot;: &quot;#641800&quot;,
+                        &quot;surface-container-highest&quot;: &quot;#e3e1ec&quot;,
+                        &quot;on-secondary-fixed&quot;: &quot;#1c1b1b&quot;,
+                        &quot;primary-fixed-dim&quot;: &quot;#ffb59f&quot;,
+                        &quot;surface-bright&quot;: &quot;#fbf8ff&quot;,
+                        &quot;on-secondary&quot;: &quot;#ffffff&quot;,
+                        &quot;secondary-fixed&quot;: &quot;#e5e2e1&quot;,
+                        &quot;tertiary-container&quot;: &quot;#9d9c98&quot;,
+                        &quot;on-secondary-fixed-variant&quot;: &quot;#474746&quot;,
+                        &quot;outline&quot;: &quot;#8d7169&quot;,
+                        &quot;on-primary-fixed&quot;: &quot;#3a0a00&quot;,
+                        &quot;on-primary&quot;: &quot;#ffffff&quot;,
+                        &quot;secondary-fixed-dim&quot;: &quot;#c8c6c5&quot;,
+                        &quot;error&quot;: &quot;#ba1a1a&quot;,
+                        &quot;on-primary-fixed-variant&quot;: &quot;#852300&quot;,
+                        &quot;on-surface-variant&quot;: &quot;#59413a&quot;,
+                        &quot;outline-variant&quot;: &quot;#e0bfb6&quot;,
+                        &quot;surface-container&quot;: &quot;#eeedf7&quot;,
+                        &quot;on-background&quot;: &quot;#1a1b22&quot;,
+                        &quot;tertiary&quot;: &quot;#5e5e5b&quot;,
+                        &quot;on-tertiary-fixed&quot;: &quot;#1b1c19&quot;,
+                        &quot;inverse-primary&quot;: &quot;#ffb59f&quot;,
+                        &quot;surface-tint&quot;: &quot;#ac3509&quot;,
+                        &quot;on-tertiary-fixed-variant&quot;: &quot;#474744&quot;,
+                        &quot;inverse-surface&quot;: &quot;#2f3038&quot;,
+                        &quot;on-error&quot;: &quot;#ffffff&quot;,
+                        &quot;inverse-on-surface&quot;: &quot;#f1effa&quot;,
+                        &quot;secondary&quot;: &quot;#5f5e5e&quot;,
+                        &quot;secondary-container&quot;: &quot;#e2dfde&quot;,
+                        &quot;surface-container-high&quot;: &quot;#e8e7f1&quot;,
+                        &quot;on-secondary-container&quot;: &quot;#636262&quot;,
+                        &quot;on-surface&quot;: &quot;#1a1b22&quot;,
+                        &quot;tertiary-fixed&quot;: &quot;#e4e2dd&quot;,
+                        &quot;surface-container-low&quot;: &quot;#f4f2fd&quot;,
+                        &quot;primary-fixed&quot;: &quot;#ffdbd0&quot;,
+                        &quot;on-tertiary-container&quot;: &quot;#333431&quot;,
+                        &quot;error-container&quot;: &quot;#ffdad6&quot;,
+                        &quot;surface-dim&quot;: &quot;#dad9e3&quot;,
+                        &quot;surface&quot;: &quot;#fbf8ff&quot;,
+                        &quot;background&quot;: &quot;#fbf8ff&quot;,
+                        &quot;on-tertiary&quot;: &quot;#ffffff&quot;,
+                        &quot;surface-container-lowest&quot;: &quot;#ffffff&quot;,
+                        &quot;on-error-container&quot;: &quot;#93000a&quot;,
+                        &quot;tertiary-fixed-dim&quot;: &quot;#c8c6c2&quot;,
+                        &quot;surface-variant&quot;: &quot;#e3e1ec&quot;
+                    },
+                    &quot;borderRadius&quot;: {
+                        &quot;DEFAULT&quot;: &quot;0.25rem&quot;,
+                        &quot;lg&quot;: &quot;0.5rem&quot;,
+                        &quot;xl&quot;: &quot;0.75rem&quot;,
+                        &quot;full&quot;: &quot;9999px&quot;
+                    },
+                    &quot;spacing&quot;: {
+                        &quot;margin-mobile&quot;: &quot;16px&quot;,
+                        &quot;md&quot;: &quot;24px&quot;,
+                        &quot;sm&quot;: &quot;12px&quot;,
+                        &quot;lg&quot;: &quot;48px&quot;,
+                        &quot;base&quot;: &quot;8px&quot;,
+                        &quot;xs&quot;: &quot;4px&quot;,
+                        &quot;gutter&quot;: &quot;24px&quot;,
+                        &quot;xl&quot;: &quot;80px&quot;,
+                        &quot;margin-desktop&quot;: &quot;64px&quot;
+                    },
+                    &quot;fontFamily&quot;: {
+                        &quot;body-lg&quot;: [&quot;Inter&quot;],
+                        &quot;headline-sm&quot;: [&quot;Geist&quot;],
+                        &quot;caption&quot;: [&quot;Inter&quot;],
+                        &quot;display-lg&quot;: [&quot;Geist&quot;],
+                        &quot;display-lg-mobile&quot;: [&quot;Geist&quot;],
+                        &quot;headline-md&quot;: [&quot;Geist&quot;],
+                        &quot;label-md&quot;: [&quot;Geist&quot;],
+                        &quot;body-md&quot;: [&quot;Inter&quot;]
+                    },
+                    &quot;fontSize&quot;: {
+                        &quot;body-lg&quot;: [&quot;18px&quot;, { &quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;400&quot; }],
+                        &quot;headline-sm&quot;: [&quot;20px&quot;, { &quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;600&quot; }],
+                        &quot;caption&quot;: [&quot;12px&quot;, { &quot;lineHeight&quot;: &quot;16px&quot;, &quot;fontWeight&quot;: &quot;400&quot; }],
+                        &quot;display-lg&quot;: [&quot;48px&quot;, { &quot;lineHeight&quot;: &quot;56px&quot;, &quot;letterSpacing&quot;: &quot;-0.02em&quot;, &quot;fontWeight&quot;: &quot;700&quot; }],
+                        &quot;display-lg-mobile&quot;: [&quot;32px&quot;, { &quot;lineHeight&quot;: &quot;40px&quot;, &quot;letterSpacing&quot;: &quot;-0.01em&quot;, &quot;fontWeight&quot;: &quot;700&quot; }],
+                        &quot;headline-md&quot;: [&quot;24px&quot;, { &quot;lineHeight&quot;: &quot;32px&quot;, &quot;fontWeight&quot;: &quot;600&quot; }],
+                        &quot;label-md&quot;: [&quot;14px&quot;, { &quot;lineHeight&quot;: &quot;20px&quot;, &quot;letterSpacing&quot;: &quot;0.05em&quot;, &quot;fontWeight&quot;: &quot;600&quot; }],
+                        &quot;body-md&quot;: [&quot;16px&quot;, { &quot;lineHeight&quot;: &quot;24px&quot;, &quot;fontWeight&quot;: &quot;400&quot; }]
+                    }
+                }
+            }
+        }
+    &lt;/script&gt;
+&lt;style&gt;
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0px 12px 32px rgba(255, 112, 67, 0.08);
+        }
+        .ai-insight {
+            position: relative;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(16px);
+        }
+        .ai-insight::before {
+            content: &#x27;&#x27;;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border-radius: inherit;
+            padding: 2px;
+            background: linear-gradient(135deg, #ac3509, #ffb59f);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body class=&quot;bg-background text-on-background font-body-lg min-h-screen overflow-x-hidden flex&quot;&gt;
+&lt;!-- SideNavBar (from JSON) --&gt;
+&lt;nav class=&quot;hidden lg:flex flex-col h-full border-r border-outline-variant fixed left-0 w-64 bg-surface-container-low/90 dark:bg-surface-dim/90 backdrop-blur-lg shadow-lg shadow-black/5 z-40&quot;&gt;
+&lt;div class=&quot;p-md flex items-center gap-sm border-b border-outline-variant&quot;&gt;
+&lt;div class=&quot;w-10 h-10 rounded-full overflow-hidden flex-shrink-0&quot;&gt;
+&lt;img alt=&quot;Restaurant Logo&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A minimalist vector logo of a modern restaurant named Bistro Luxe. The logo features a clean, stylized cloche or plate icon in deep burnt orange and charcoal grey. The aesthetic is premium, high-end, and perfectly suited for a light-mode modern UI design with plenty of white space.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuDi-iblcN54va2Flv9aXwJb-ZAH9vweKfgoNRAuXAP3dUglSJE7pwiHEKRdP_o6Ji_T4TggnJBb9bGx_LSfTE_8fP4UeqTzZO29LT7Cw5yi5BtuTBdhg5_y3Im9R5BIi560qMVPD2hHbY_Jz1DjZ5YoB0S2v3NwTX1BqYpEnXkvtICeffp9y9xPcKetwiPDsdNURxVcVSjUiEz3GJwwbYkGNga5bCnGCW5yA6EYbpmxwImb3RGdq6yQACl4lwbKuh2xUrlLch3MW_xD&quot;/&gt;
+&lt;/div&gt;
+&lt;div&gt;
+&lt;h1 class=&quot;font-headline-md text-headline-md text-primary&quot;&gt;Bistro Luxe&lt;/h1&gt;
+&lt;p class=&quot;font-caption text-caption text-secondary&quot;&gt;Restaurant Admin&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex-1 py-md flex flex-col gap-sm overflow-y-auto&quot; id=&quot;nav-tabs&quot;&gt;
+&lt;button class=&quot;bg-primary-container text-on-primary-container rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;dashboard&lt;/span&gt;
+                Analytics
+            &lt;/button&gt;
+&lt;button class=&quot;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;menu_book&lt;/span&gt;
+                Menu
+            &lt;/button&gt;
+&lt;button class=&quot;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;receipt_long&lt;/span&gt;
+                Orders
+            &lt;/button&gt;
+&lt;button class=&quot;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;group&lt;/span&gt;
+                Staff
+            &lt;/button&gt;
+&lt;button class=&quot;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;settings&lt;/span&gt;
+                Settings
+            &lt;/button&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-sm border-t border-outline-variant flex flex-col gap-xs&quot;&gt;
+&lt;button class=&quot;w-full bg-primary text-on-primary rounded-xl py-3 font-label-md text-label-md shadow-md shadow-primary/10 hover:-translate-y-0.5 transition-transform mb-sm&quot;&gt;
+                Support
+            &lt;/button&gt;
+&lt;button class=&quot;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;help&lt;/span&gt;
+                Help
+            &lt;/button&gt;
+&lt;button class=&quot;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all font-label-md text-label-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;logout&lt;/span&gt;
+                Logout
+            &lt;/button&gt;
+&lt;/div&gt;
+&lt;/nav&gt;
+&lt;!-- Main Content --&gt;
+&lt;main class=&quot;flex-1 lg:ml-64 p-margin-mobile md:p-margin-desktop min-h-screen bg-surface-bright pb-xl&quot;&gt;
+&lt;header class=&quot;mb-lg flex justify-between items-end&quot;&gt;
+&lt;div&gt;
+&lt;h2 class=&quot;font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg text-on-background mb-sm&quot;&gt;Dashboard Overview&lt;/h2&gt;
+&lt;p class=&quot;font-body-lg text-body-lg text-secondary&quot;&gt;Real-time performance and active management.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;hidden md:flex gap-sm&quot;&gt;
+&lt;button class=&quot;p-3 rounded-full bg-surface-container hover:bg-secondary-container transition-colors shadow-sm text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;notifications&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/header&gt;
+&lt;!-- Analytics Bento Grid --&gt;
+&lt;section class=&quot;grid grid-cols-1 md:grid-cols-3 gap-md mb-xl&quot;&gt;
+&lt;!-- Revenue Card --&gt;
+&lt;div class=&quot;glass-card rounded-xl p-md flex flex-col justify-between h-48 group&quot;&gt;
+&lt;div class=&quot;flex justify-between items-start&quot;&gt;
+&lt;div&gt;
+&lt;p class=&quot;font-label-md text-label-md text-tertiary uppercase tracking-wider mb-xs&quot;&gt;Total Revenue (Today)&lt;/p&gt;
+&lt;h3 class=&quot;font-display-lg-mobile text-display-lg-mobile text-on-background&quot;&gt;$14,205.50&lt;/h3&gt;
+&lt;/div&gt;
+&lt;div class=&quot;bg-surface-container-low p-2 rounded-lg text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;trending_up&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center gap-xs&quot;&gt;
+&lt;span class=&quot;text-primary font-label-md text-label-md bg-primary-fixed px-2 py-0.5 rounded-full&quot;&gt;+12.5%&lt;/span&gt;
+&lt;span class=&quot;font-caption text-caption text-secondary&quot;&gt;vs yesterday&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Active Orders Card --&gt;
+&lt;div class=&quot;ai-insight rounded-xl p-md flex flex-col justify-between h-48&quot;&gt;
+&lt;div class=&quot;flex justify-between items-start&quot;&gt;
+&lt;div&gt;
+&lt;p class=&quot;font-label-md text-label-md text-tertiary uppercase tracking-wider mb-xs flex items-center gap-xs&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[16px] text-primary&quot;&gt;auto_awesome&lt;/span&gt; Active Orders
+                        &lt;/p&gt;
+&lt;h3 class=&quot;font-display-lg-mobile text-display-lg-mobile text-on-background&quot;&gt;42&lt;/h3&gt;
+&lt;/div&gt;
+&lt;div class=&quot;w-12 h-12 rounded-full border-4 border-primary-container flex items-center justify-center text-primary font-label-md&quot;&gt;
+                        ETA
+                    &lt;/div&gt;
+&lt;/div&gt;
+&lt;p class=&quot;font-caption text-caption text-secondary mt-auto&quot;&gt;AI predicted wait time: &lt;strong class=&quot;text-primary&quot;&gt;14 mins&lt;/strong&gt; (Avg)&lt;/p&gt;
+&lt;/div&gt;
+&lt;!-- Top Items Chart Placeholder --&gt;
+&lt;div class=&quot;glass-card rounded-xl p-md flex flex-col h-48 relative overflow-hidden&quot;&gt;
+&lt;p class=&quot;font-label-md text-label-md text-tertiary uppercase tracking-wider mb-sm z-10&quot;&gt;Top Performing Items&lt;/p&gt;
+&lt;div class=&quot;flex-1 flex items-end gap-2 z-10&quot;&gt;
+&lt;!-- Bar Chart Mock --&gt;
+&lt;div class=&quot;w-full bg-primary/20 rounded-t-md h-[40%] hover:bg-primary/40 transition-colors relative group&quot;&gt;
+&lt;div class=&quot;absolute -top-8 left-1/2 -translate-x-1/2 bg-surface shadow-md px-2 py-1 rounded text-caption font-caption hidden group-hover:block whitespace-nowrap&quot;&gt;Truffle Fries&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;w-full bg-primary/40 rounded-t-md h-[70%] hover:bg-primary/60 transition-colors relative group&quot;&gt;
+&lt;div class=&quot;absolute -top-8 left-1/2 -translate-x-1/2 bg-surface shadow-md px-2 py-1 rounded text-caption font-caption hidden group-hover:block whitespace-nowrap&quot;&gt;Wagyu Burger&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;w-full bg-primary rounded-t-md h-[95%] hover:bg-primary/90 transition-colors relative group&quot;&gt;
+&lt;div class=&quot;absolute -top-8 left-1/2 -translate-x-1/2 bg-surface shadow-md px-2 py-1 rounded text-caption font-caption hidden group-hover:block whitespace-nowrap&quot;&gt;Lobster Roll&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;w-full bg-primary/60 rounded-t-md h-[60%] hover:bg-primary/80 transition-colors relative group&quot;&gt;
+&lt;div class=&quot;absolute -top-8 left-1/2 -translate-x-1/2 bg-surface shadow-md px-2 py-1 rounded text-caption font-caption hidden group-hover:block whitespace-nowrap&quot;&gt;Oysters&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;w-full bg-primary/30 rounded-t-md h-[50%] hover:bg-primary/50 transition-colors relative group&quot;&gt;
+&lt;div class=&quot;absolute -top-8 left-1/2 -translate-x-1/2 bg-surface shadow-md px-2 py-1 rounded text-caption font-caption hidden group-hover:block whitespace-nowrap&quot;&gt;Martini&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;!-- Managed Locations --&gt;
+&lt;section&gt;
+&lt;div class=&quot;flex justify-between items-center mb-md&quot;&gt;
+&lt;h3 class=&quot;font-headline-md text-headline-md text-on-background&quot;&gt;Managed Locations&lt;/h3&gt;
+&lt;button class=&quot;bg-surface-container-high hover:bg-secondary-container text-on-surface px-4 py-2 rounded-lg font-label-md text-label-md transition-colors flex items-center gap-2&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[18px]&quot;&gt;add&lt;/span&gt; Add Location
+                &lt;/button&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex flex-col gap-sm&quot;&gt;
+&lt;!-- Location Item 1 --&gt;
+&lt;div class=&quot;glass-card rounded-xl p-md flex flex-col md:flex-row justify-between items-start md:items-center gap-md hover:shadow-lg transition-shadow&quot;&gt;
+&lt;div class=&quot;flex gap-md items-center&quot;&gt;
+&lt;div class=&quot;w-16 h-16 rounded-xl overflow-hidden shadow-sm flex-shrink-0&quot;&gt;
+&lt;img alt=&quot;Location photo&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A clean, modern exterior shot of an upscale bistro named &#x27;Downtown Main&#x27;. The lighting is bright and inviting, typical of a sunny afternoon in a bustling city. The restaurant features large glass windows and elegant, minimalist signage suitable for a high-end light mode dashboard.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuAi77RdQXzy42qjyBYU3LjAB51pP6CDRe_Ywre9zVLuAWY6t1ZSyQkg9gQJUw8zLVRLh2BIgyhI7wMhqSbXMK31GfxBWO9_ftWwMsOSNdkCyxcXQuO_GLCJQHkUeN7ChEQipAQbtS2w0htw-sV4JAgfsHLASCmP7afK9FJgU-l_DwaH0YGgqrQp_mPaKah37zkL-VNj8B3o68f1hgaqbpF5R5DtqosgtIt88rfbVxGOpQNaadRwRKqb7KpQ-cZQX61taKQRgJvdp-Tr&quot;/&gt;
+&lt;/div&gt;
+&lt;div&gt;
+&lt;h4 class=&quot;font-headline-sm text-headline-sm text-on-background&quot;&gt;Downtown Main&lt;/h4&gt;
+&lt;p class=&quot;font-body-md text-body-md text-secondary&quot;&gt;124 Culinary Ave, Metropolis&lt;/p&gt;
+&lt;div class=&quot;flex gap-2 mt-2&quot;&gt;
+&lt;span class=&quot;bg-surface-container-high text-on-surface-variant px-3 py-1 rounded-full font-caption text-caption&quot;&gt;Dine-in&lt;/span&gt;
+&lt;span class=&quot;bg-surface-container-high text-on-surface-variant px-3 py-1 rounded-full font-caption text-caption&quot;&gt;Takeout&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center gap-md w-full md:w-auto justify-end&quot;&gt;
+&lt;div class=&quot;flex items-center gap-2 mr-4&quot;&gt;
+&lt;span class=&quot;font-label-md text-label-md text-on-surface-variant&quot; id=&quot;status-label-1&quot;&gt;Active&lt;/span&gt;
+&lt;!-- Toggle --&gt;
+&lt;button class=&quot;w-12 h-6 rounded-full bg-primary-container relative transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2&quot; id=&quot;toggle-1&quot;&gt;
+&lt;div class=&quot;w-4 h-4 bg-white rounded-full absolute top-1 right-1 transition-transform duration-300 shadow-sm&quot; id=&quot;toggle-knob-1&quot;&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;button class=&quot;border border-outline-variant text-on-surface hover:bg-surface-container-high px-4 py-2 rounded-lg font-label-md text-label-md transition-colors flex items-center gap-2&quot; onclick=&quot;openPanel(&#x27;Downtown Main&#x27;)&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[18px]&quot;&gt;edit&lt;/span&gt; Edit
+                        &lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Location Item 2 --&gt;
+&lt;div class=&quot;glass-card rounded-xl p-md flex flex-col md:flex-row justify-between items-start md:items-center gap-md hover:shadow-lg transition-shadow&quot;&gt;
+&lt;div class=&quot;flex gap-md items-center&quot;&gt;
+&lt;div class=&quot;w-16 h-16 rounded-xl overflow-hidden shadow-sm flex-shrink-0&quot;&gt;
+&lt;img alt=&quot;Location photo&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A bright, airy photo of an upscale waterfront restaurant named &#x27;Riverside Terrace&#x27;. The setting shows sleek outdoor seating with modern sun shades, overlooking a calm river. The aesthetic is clean, minimalist, and perfectly lit for a sophisticated light-mode application.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuA4-5vTcXH8G3THKsmUHVPtDGKu2FAaLGOI4KsRxS28typA0bqulag4KyjbZ7s4sp19bHS2ajD8JrGdxLptxmspcEEgxETKIQg3KvrKi75h_zS8mq-6tsFXJc4VUcS_EhIB0bHGou6lc5kJ_rwxTcwmin-2esYr-rMi3TPPbrebUSYZUSce7fsS1e3xZF5gKe8wYdLCR585XUyfbEBez31TQWnCajMZEBm80GwdxobVT_E-oJd5FoukUIc7d4yGME2Fhl7g6zQK1jQ-&quot;/&gt;
+&lt;/div&gt;
+&lt;div&gt;
+&lt;h4 class=&quot;font-headline-sm text-headline-sm text-on-background&quot;&gt;Riverside Terrace&lt;/h4&gt;
+&lt;p class=&quot;font-body-md text-body-md text-secondary&quot;&gt;88 Waterway Blvd, Metropolis&lt;/p&gt;
+&lt;div class=&quot;flex gap-2 mt-2&quot;&gt;
+&lt;span class=&quot;bg-surface-container-high text-on-surface-variant px-3 py-1 rounded-full font-caption text-caption&quot;&gt;Dine-in&lt;/span&gt;
+&lt;span class=&quot;bg-primary-fixed text-primary px-3 py-1 rounded-full font-caption text-caption&quot;&gt;Event Space&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center gap-md w-full md:w-auto justify-end&quot;&gt;
+&lt;div class=&quot;flex items-center gap-2 mr-4&quot;&gt;
+&lt;span class=&quot;font-label-md text-label-md text-tertiary&quot; id=&quot;status-label-2&quot;&gt;Inactive&lt;/span&gt;
+&lt;!-- Toggle --&gt;
+&lt;button class=&quot;w-12 h-6 rounded-full bg-surface-container-high relative transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2&quot; id=&quot;toggle-2&quot;&gt;
+&lt;div class=&quot;w-4 h-4 bg-tertiary rounded-full absolute top-1 left-1 transition-transform duration-300 shadow-sm&quot; id=&quot;toggle-knob-2&quot;&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;button class=&quot;border border-outline-variant text-on-surface hover:bg-surface-container-high px-4 py-2 rounded-lg font-label-md text-label-md transition-colors flex items-center gap-2&quot; onclick=&quot;openPanel(&#x27;Riverside Terrace&#x27;)&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[18px]&quot;&gt;edit&lt;/span&gt; Edit
+                        &lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;/main&gt;
+&lt;!-- Slide-over Panel (Hidden by default) --&gt;
+&lt;div class=&quot;fixed inset-0 bg-on-background/20 backdrop-blur-sm z-50 hidden opacity-0 transition-opacity duration-300&quot; id=&quot;slide-panel-backdrop&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;fixed top-0 right-0 h-full w-full max-w-md bg-surface shadow-2xl z-50 transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col border-l border-outline-variant&quot; id=&quot;slide-panel&quot;&gt;
+&lt;div class=&quot;p-md border-b border-outline-variant flex justify-between items-center bg-surface-container-low/50 backdrop-blur-md&quot;&gt;
+&lt;h3 class=&quot;font-headline-md text-headline-md text-on-background&quot; id=&quot;panel-title&quot;&gt;Edit Location&lt;/h3&gt;
+&lt;button class=&quot;p-2 rounded-full hover:bg-surface-container transition-colors text-on-surface-variant&quot; onclick=&quot;closePanel()&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;close&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-md flex-1 overflow-y-auto&quot;&gt;
+&lt;div class=&quot;mb-lg&quot;&gt;
+&lt;div class=&quot;w-full h-48 rounded-xl overflow-hidden mb-sm relative&quot;&gt;
+&lt;img alt=&quot;Location Cover&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A high-quality, bright interior shot of a sophisticated restaurant dining room. The focus is on a beautifully set table with modern flatware and subtle floral arrangements. The room is bathed in natural light, enhancing the clean, minimalist, modern epicurean design style suitable for a high-end restaurant management app.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuCssuJFY6qZT3K0EQOoJjjlAoYaMr5fAZwJwK1eHRf1IU7cGoFayKAOhfCBcctlxVGlW-CZtE8EitcI0m5tZHK2RZkMp0L14FbWwGAkwfKgBjry_SSkeanvbiUnt_BXTQ9k9G6HFok5Lvk8vGe5CCeeKJvBvBh-0kKsp0GdvIYAZAFEeTJ1orYhe9FanlPwm7J0qpn62UbdOxvtEqT8DXyv-ei2YiE55FjOymxZZ5rNGPXw7PB9m29rDEkbFnUO9BoqrAs3lmQ0fVj0&quot;/&gt;
+&lt;button class=&quot;absolute bottom-2 right-2 bg-surface/80 backdrop-blur-md p-2 rounded-lg shadow-md text-primary font-label-md text-label-md flex items-center gap-1&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[16px]&quot;&gt;photo_camera&lt;/span&gt; Change
+                    &lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;form class=&quot;flex flex-col gap-md&quot;&gt;
+&lt;div&gt;
+&lt;label class=&quot;block font-label-md text-label-md text-on-surface mb-2&quot;&gt;Location Name&lt;/label&gt;
+&lt;input class=&quot;w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-3 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent&quot; type=&quot;text&quot; value=&quot;Downtown Main&quot;/&gt;
+&lt;/div&gt;
+&lt;div&gt;
+&lt;label class=&quot;block font-label-md text-label-md text-on-surface mb-2&quot;&gt;Address&lt;/label&gt;
+&lt;input class=&quot;w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-3 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent&quot; type=&quot;text&quot; value=&quot;124 Culinary Ave, Metropolis&quot;/&gt;
+&lt;/div&gt;
+&lt;div&gt;
+&lt;label class=&quot;block font-label-md text-label-md text-on-surface mb-2 flex items-center gap-2&quot;&gt;
+                        Capacity Optimization
+                        &lt;span class=&quot;material-symbols-outlined text-[16px] text-primary&quot; title=&quot;AI Managed&quot;&gt;auto_awesome&lt;/span&gt;
+&lt;/label&gt;
+&lt;select class=&quot;w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-3 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent appearance-none&quot;&gt;
+&lt;option&gt;Aggressive (Max Seating)&lt;/option&gt;
+&lt;option selected=&quot;&quot;&gt;Balanced (Comfort + Revenue)&lt;/option&gt;
+&lt;option&gt;Spacious (Premium Experience)&lt;/option&gt;
+&lt;/select&gt;
+&lt;/div&gt;
+&lt;/form&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-md border-t border-outline-variant bg-surface-container-lowest flex gap-sm justify-end&quot;&gt;
+&lt;button class=&quot;px-6 py-3 rounded-xl font-label-md text-label-md text-on-surface border border-outline-variant hover:bg-surface-container transition-colors&quot; onclick=&quot;closePanel()&quot;&gt;Cancel&lt;/button&gt;
+&lt;button class=&quot;px-6 py-3 rounded-xl font-label-md text-label-md text-on-primary bg-primary hover:-translate-y-0.5 shadow-md shadow-primary/20 transition-all&quot; onclick=&quot;closePanel()&quot;&gt;Save Changes&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;script&gt;
+        // Toggle Logic
+        function setupToggle(toggleId, knobId, labelId, isInitiallyActive) {
+            const toggle = document.getElementById(toggleId);
+            const knob = document.getElementById(knobId);
+            const label = document.getElementById(labelId);
+            let isActive = isInitiallyActive;
+
+            toggle.addEventListener(&#x27;click&#x27;, () =&gt; {
+                isActive = !isActive;
+                if (isActive) {
+                    toggle.classList.remove(&#x27;bg-surface-container-high&#x27;);
+                    toggle.classList.add(&#x27;bg-primary-container&#x27;);
+                    
+                    knob.classList.remove(&#x27;left-1&#x27;, &#x27;bg-tertiary&#x27;);
+                    knob.classList.add(&#x27;right-1&#x27;, &#x27;bg-white&#x27;, &#x27;translate-x-full&#x27;); // Adjust based on width
+                    knob.style.transform = &#x27;translateX(100%)&#x27;;
+                    
+                    setTimeout(() =&gt; { knob.style.transform = &#x27;translateX(0)&#x27;; knob.classList.remove(&#x27;translate-x-full&#x27;, &#x27;left-1&#x27;); knob.classList.add(&#x27;right-1&#x27;);}, 10); // reset transform hack for tailwind classes if needed, simpler to just use absolute positioning swap
+                     
+                    knob.style.left = &#x27;auto&#x27;;
+                    knob.style.right = &#x27;4px&#x27;;
+                    knob.classList.remove(&#x27;bg-tertiary&#x27;);
+                    knob.classList.add(&#x27;bg-white&#x27;);
+
+                    label.textContent = &#x27;Active&#x27;;
+                    label.classList.remove(&#x27;text-tertiary&#x27;);
+                    label.classList.add(&#x27;text-on-surface-variant&#x27;);
+                } else {
+                    toggle.classList.remove(&#x27;bg-primary-container&#x27;);
+                    toggle.classList.add(&#x27;bg-surface-container-high&#x27;);
+                    
+                    knob.style.right = &#x27;auto&#x27;;
+                    knob.style.left = &#x27;4px&#x27;;
+                    knob.classList.remove(&#x27;bg-white&#x27;);
+                    knob.classList.add(&#x27;bg-tertiary&#x27;);
+
+                    label.textContent = &#x27;Inactive&#x27;;
+                    label.classList.remove(&#x27;text-on-surface-variant&#x27;);
+                    label.classList.add(&#x27;text-tertiary&#x27;);
+                }
+            });
+            // Init layout
+            if(isActive) {
+                knob.style.right = &#x27;4px&#x27;;
+                knob.style.left = &#x27;auto&#x27;;
+            } else {
+                knob.style.left = &#x27;4px&#x27;;
+                knob.style.right = &#x27;auto&#x27;;
+            }
+        }
+
+        setupToggle(&#x27;toggle-1&#x27;, &#x27;toggle-knob-1&#x27;, &#x27;status-label-1&#x27;, true);
+        setupToggle(&#x27;toggle-2&#x27;, &#x27;toggle-knob-2&#x27;, &#x27;status-label-2&#x27;, false);
+
+        // Sidebar Active State Logic
+        const navBtns = document.querySelectorAll(&#x27;.nav-btn&#x27;);
+        navBtns.forEach(btn =&gt; {
+            btn.addEventListener(&#x27;click&#x27;, function() {
+                // Reset all
+                navBtns.forEach(b =&gt; {
+                    b.className = &#x27;text-on-surface-variant hover:bg-secondary-container/50 rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&#x27;;
+                    const icon = b.querySelector(&#x27;.material-symbols-outlined&#x27;);
+                    if(icon) icon.style.fontVariationSettings = &quot;&#x27;FILL&#x27; 0&quot;;
+                });
+                
+                // Set active
+                this.className = &#x27;bg-primary-container text-on-primary-container rounded-xl mx-2 my-1 px-4 py-3 flex items-center gap-3 active:scale-98 transition-all hover:translate-x-1 nav-btn font-label-md text-label-md&#x27;;
+                const activeIcon = this.querySelector(&#x27;.material-symbols-outlined&#x27;);
+                if(activeIcon) activeIcon.style.fontVariationSettings = &quot;&#x27;FILL&#x27; 1&quot;;
+            });
+        });
+
+        // Slide-over Panel Logic
+        const panel = document.getElementById(&#x27;slide-panel&#x27;);
+        const backdrop = document.getElementById(&#x27;slide-panel-backdrop&#x27;);
+        const panelTitle = document.getElementById(&#x27;panel-title&#x27;);
+
+        function openPanel(title) {
+            if(title) panelTitle.textContent = &#x27;Edit &#x27; + title;
+            
+            backdrop.classList.remove(&#x27;hidden&#x27;);
+            // Small delay to allow display:block to apply before animating opacity
+            setTimeout(() =&gt; {
+                backdrop.classList.remove(&#x27;opacity-0&#x27;);
+                backdrop.classList.add(&#x27;opacity-100&#x27;);
+            }, 10);
+            
+            panel.classList.remove(&#x27;translate-x-full&#x27;);
+            document.body.style.overflow = &#x27;hidden&#x27;; // Prevent scrolling
+        }
+
+        function closePanel() {
+            panel.classList.add(&#x27;translate-x-full&#x27;);
+            
+            backdrop.classList.remove(&#x27;opacity-100&#x27;);
+            backdrop.classList.add(&#x27;opacity-0&#x27;);
+            
+            setTimeout(() =&gt; {
+                backdrop.classList.add(&#x27;hidden&#x27;);
+                document.body.style.overflow = &#x27;&#x27;;
+            }, 300); // Wait for transition
+        }
+        
+        backdrop.addEventListener(&#x27;click&#x27;, closePanel);
+    &lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  function alreadyHandled(el) {
+    if (el.hasAttribute(&#x27;onclick&#x27;)) return true;
+    if (el.tagName === &#x27;A&#x27; &amp;&amp; el.getAttribute(&#x27;href&#x27;) &amp;&amp; el.getAttribute(&#x27;href&#x27;) !== &#x27;#&#x27;) return true;
+    if (el.tagName === &#x27;BUTTON&#x27; &amp;&amp; el.type === &#x27;submit&#x27;) return true;
+    return false;
+  }
+  function showPing(el) {
+    var ping = document.createElement(&#x27;div&#x27;);
+    ping.textContent = &#x27;\u2713&#x27;;
+    ping.style.cssText = &#x27;position:absolute;pointer-events:none;font-size:11px;&#x27; +
+      &#x27;color:#00E6A8;font-weight:700;opacity:0;transition:opacity .15s,transform .4s;&#x27; +
+      &#x27;transform:translateY(0);z-index:99999;&#x27;;
+    var rect = el.getBoundingClientRect();
+    ping.style.left = (rect.right - 14 + window.scrollX) + &#x27;px&#x27;;
+    ping.style.top = (rect.top - 6 + window.scrollY) + &#x27;px&#x27;;
+    document.body.appendChild(ping);
+    requestAnimationFrame(function () { ping.style.opacity = &#x27;1&#x27;; });
+    setTimeout(function () {
+      ping.style.opacity = &#x27;0&#x27;;
+      ping.style.transform = &#x27;translateY(-10px)&#x27;;
+    }, 400);
+    setTimeout(function () { ping.remove(); }, 800);
+    el.style.transition = el.style.transition || &#x27;transform .12s&#x27;;
+    var prevTransform = el.style.transform;
+    el.style.transform = &#x27;scale(0.97)&#x27;;
+    setTimeout(function () { el.style.transform = prevTransform || &#x27;&#x27;; }, 120);
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;button, a, [role=&quot;button&quot;], [data-clickable]&#x27;);
+    if (!el || alreadyHandled(el)) return;
+    showPing(el);
+  }, true);
+})();
+&lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  var NAV = {&quot;tokens&quot;: [[&quot;admin&quot;, &quot;dashboard&quot;], [&quot;discover&quot;, &quot;restaurants&quot;], [&quot;bistro&quot;, &quot;luxe&quot;, &quot;menu&quot;], [&quot;secure&quot;, &quot;checkout&quot;]], &quot;current&quot;: 0};
+  function norm(s) { return (s || &#x27;&#x27;).toLowerCase().replace(/[^a-z0-9]+/g, &#x27; &#x27;).trim(); }
+  function singular(w) { return (w.length &gt; 3 &amp;&amp; w.charAt(w.length - 1) === &#x27;s&#x27;) ? w.slice(0, -1) : w; }
+  function matchScreen(text) {
+    var words = norm(text).split(&#x27; &#x27;).filter(Boolean).map(singular);
+    if (!words.length) return -1;
+    var wordSet = {};
+    words.forEach(function (w) { wordSet[w] = true; });
+    for (var i = 0; i &lt; NAV.tokens.length; i++) {
+      var toks = NAV.tokens[i];
+      for (var j = 0; j &lt; toks.length; j++) {
+        if (wordSet[singular(toks[j])]) return i;
+      }
+    }
+    return -1;
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;a, button, [role=&quot;button&quot;], [data-clickable], li, [class*=&quot;card&quot;], [class*=&quot;nav&quot;] a, [class*=&quot;menu&quot;] a&#x27;);
+    if (!el) return;
+    var text = (el.innerText || el.textContent || &#x27;&#x27;).trim();
+    if (!text || text.length &gt; 60) return;  // a long blob isn&#x27;t a nav label
+    var idx = matchScreen(text);
+    if (idx &lt; 0 || idx === NAV.current) return;  // no match, or already here
+    if (window.parent &amp;&amp; window.parent.ppShowScreen) {
+      e.preventDefault();
+      e.stopImmediatePropagation();  // beat the &quot;#&quot; link and the safety-net ping
+      window.parent.ppShowScreen(idx);
+    }
+  }, true);
+})();
+&lt;/script&gt;
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div class="pp-screen" id="pp-screen-1" style="display:none"><iframe class="pp-frame" srcdoc="&lt;!DOCTYPE html&gt;
+
+&lt;html class=&quot;light&quot; lang=&quot;en&quot;&gt;&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;/&gt;
+&lt;meta content=&quot;width=device-width, initial-scale=1.0&quot; name=&quot;viewport&quot;/&gt;
+&lt;title&gt;DineFlow - Restaurants&lt;/title&gt;
+&lt;script src=&quot;https://cdn.tailwindcss.com?plugins=forms,container-queries&quot;&gt;&lt;/script&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;amp;family=Inter:wght@400;600&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;script id=&quot;tailwind-config&quot;&gt;
+        tailwind.config = {
+          darkMode: &quot;class&quot;,
+          theme: {
+            extend: {
+              &quot;colors&quot;: {
+                &quot;primary-container&quot;: &quot;#ff7043&quot;,
+                &quot;primary&quot;: &quot;#ac3509&quot;,
+                &quot;on-primary-container&quot;: &quot;#641800&quot;,
+                &quot;surface-container-highest&quot;: &quot;#e3e1ec&quot;,
+                &quot;on-secondary-fixed&quot;: &quot;#1c1b1b&quot;,
+                &quot;primary-fixed-dim&quot;: &quot;#ffb59f&quot;,
+                &quot;surface-bright&quot;: &quot;#fbf8ff&quot;,
+                &quot;on-secondary&quot;: &quot;#ffffff&quot;,
+                &quot;secondary-fixed&quot;: &quot;#e5e2e1&quot;,
+                &quot;tertiary-container&quot;: &quot;#9d9c98&quot;,
+                &quot;on-secondary-fixed-variant&quot;: &quot;#474746&quot;,
+                &quot;outline&quot;: &quot;#8d7169&quot;,
+                &quot;on-primary-fixed&quot;: &quot;#3a0a00&quot;,
+                &quot;on-primary&quot;: &quot;#ffffff&quot;,
+                &quot;secondary-fixed-dim&quot;: &quot;#c8c6c5&quot;,
+                &quot;error&quot;: &quot;#ba1a1a&quot;,
+                &quot;on-primary-fixed-variant&quot;: &quot;#852300&quot;,
+                &quot;on-surface-variant&quot;: &quot;#59413a&quot;,
+                &quot;outline-variant&quot;: &quot;#e0bfb6&quot;,
+                &quot;surface-container&quot;: &quot;#eeedf7&quot;,
+                &quot;on-background&quot;: &quot;#1a1b22&quot;,
+                &quot;tertiary&quot;: &quot;#5e5e5b&quot;,
+                &quot;on-tertiary-fixed&quot;: &quot;#1b1c19&quot;,
+                &quot;inverse-primary&quot;: &quot;#ffb59f&quot;,
+                &quot;surface-tint&quot;: &quot;#ac3509&quot;,
+                &quot;on-tertiary-fixed-variant&quot;: &quot;#474744&quot;,
+                &quot;inverse-surface&quot;: &quot;#2f3038&quot;,
+                &quot;on-error&quot;: &quot;#ffffff&quot;,
+                &quot;inverse-on-surface&quot;: &quot;#f1effa&quot;,
+                &quot;secondary&quot;: &quot;#5f5e5e&quot;,
+                &quot;secondary-container&quot;: &quot;#e2dfde&quot;,
+                &quot;surface-container-high&quot;: &quot;#e8e7f1&quot;,
+                &quot;on-secondary-container&quot;: &quot;#636262&quot;,
+                &quot;on-surface&quot;: &quot;#1a1b22&quot;,
+                &quot;tertiary-fixed&quot;: &quot;#e4e2dd&quot;,
+                &quot;surface-container-low&quot;: &quot;#f4f2fd&quot;,
+                &quot;primary-fixed&quot;: &quot;#ffdbd0&quot;,
+                &quot;on-tertiary-container&quot;: &quot;#333431&quot;,
+                &quot;error-container&quot;: &quot;#ffdad6&quot;,
+                &quot;surface-dim&quot;: &quot;#dad9e3&quot;,
+                &quot;surface&quot;: &quot;#fbf8ff&quot;,
+                &quot;background&quot;: &quot;#fbf8ff&quot;,
+                &quot;on-tertiary&quot;: &quot;#ffffff&quot;,
+                &quot;surface-container-lowest&quot;: &quot;#ffffff&quot;,
+                &quot;on-error-container&quot;: &quot;#93000a&quot;,
+                &quot;tertiary-fixed-dim&quot;: &quot;#c8c6c2&quot;,
+                &quot;surface-variant&quot;: &quot;#e3e1ec&quot;
+              },
+              &quot;borderRadius&quot;: {
+                &quot;DEFAULT&quot;: &quot;0.25rem&quot;,
+                &quot;lg&quot;: &quot;0.5rem&quot;,
+                &quot;xl&quot;: &quot;0.75rem&quot;,
+                &quot;full&quot;: &quot;9999px&quot;
+              },
+              &quot;spacing&quot;: {
+                &quot;margin-mobile&quot;: &quot;16px&quot;,
+                &quot;md&quot;: &quot;24px&quot;,
+                &quot;sm&quot;: &quot;12px&quot;,
+                &quot;lg&quot;: &quot;48px&quot;,
+                &quot;base&quot;: &quot;8px&quot;,
+                &quot;xs&quot;: &quot;4px&quot;,
+                &quot;gutter&quot;: &quot;24px&quot;,
+                &quot;xl&quot;: &quot;80px&quot;,
+                &quot;margin-desktop&quot;: &quot;64px&quot;
+              },
+              &quot;fontFamily&quot;: {
+                &quot;body-lg&quot;: [&quot;Inter&quot;],
+                &quot;headline-sm&quot;: [&quot;Geist&quot;],
+                &quot;caption&quot;: [&quot;Inter&quot;],
+                &quot;display-lg&quot;: [&quot;Geist&quot;],
+                &quot;display-lg-mobile&quot;: [&quot;Geist&quot;],
+                &quot;headline-md&quot;: [&quot;Geist&quot;],
+                &quot;label-md&quot;: [&quot;Geist&quot;],
+                &quot;body-md&quot;: [&quot;Inter&quot;]
+              },
+              &quot;fontSize&quot;: {
+                &quot;body-lg&quot;: [&quot;18px&quot;, {&quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}],
+                &quot;headline-sm&quot;: [&quot;20px&quot;, {&quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;caption&quot;: [&quot;12px&quot;, {&quot;lineHeight&quot;: &quot;16px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}],
+                &quot;display-lg&quot;: [&quot;48px&quot;, {&quot;lineHeight&quot;: &quot;56px&quot;, &quot;letterSpacing&quot;: &quot;-0.02em&quot;, &quot;fontWeight&quot;: &quot;700&quot;}],
+                &quot;display-lg-mobile&quot;: [&quot;32px&quot;, {&quot;lineHeight&quot;: &quot;40px&quot;, &quot;letterSpacing&quot;: &quot;-0.01em&quot;, &quot;fontWeight&quot;: &quot;700&quot;}],
+                &quot;headline-md&quot;: [&quot;24px&quot;, {&quot;lineHeight&quot;: &quot;32px&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;label-md&quot;: [&quot;14px&quot;, {&quot;lineHeight&quot;: &quot;20px&quot;, &quot;letterSpacing&quot;: &quot;0.05em&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;body-md&quot;: [&quot;16px&quot;, {&quot;lineHeight&quot;: &quot;24px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}]
+              }
+            }
+          }
+        }
+    &lt;/script&gt;
+&lt;style&gt;
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .shadow-ambient-md {
+            box-shadow: 0px 12px 32px rgba(255, 112, 67, 0.08);
+        }
+        .shadow-ambient-lg {
+            box-shadow: 0px 24px 48px rgba(0, 0, 0, 0.06);
+        }
+        
+        /* Hide scrollbar for horizontal scrolling but keep functionality */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body class=&quot;bg-background text-on-background font-body-md min-h-screen antialiased&quot;&gt;
+&lt;!-- TopNavBar --&gt;
+&lt;header class=&quot;fixed top-0 w-full z-50 flex justify-between items-center px-margin-mobile md:px-margin-desktop h-20 bg-surface/80 backdrop-blur-xl border-b border-white/20 shadow-md shadow-primary/10 transition-transform duration-300&quot;&gt;
+&lt;div class=&quot;flex items-center gap-md&quot;&gt;
+&lt;h1 class=&quot;font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg text-primary tracking-tight&quot;&gt;DineFlow&lt;/h1&gt;
+&lt;nav class=&quot;hidden md:flex items-center gap-md ml-lg&quot;&gt;
+&lt;a class=&quot;font-headline-sm text-headline-sm text-primary border-b-2 border-primary pb-1&quot; href=&quot;#&quot;&gt;Marketplace&lt;/a&gt;
+&lt;a class=&quot;font-headline-sm text-headline-sm text-secondary hover:text-primary transition-colors duration-300&quot; href=&quot;#&quot;&gt;Dashboard&lt;/a&gt;
+&lt;a class=&quot;font-headline-sm text-headline-sm text-secondary hover:text-primary transition-colors duration-300&quot; href=&quot;#&quot;&gt;Admin&lt;/a&gt;
+&lt;/nav&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center gap-sm md:gap-md&quot;&gt;
+&lt;div class=&quot;hidden md:flex items-center bg-surface-container-low rounded-full px-4 py-2 border border-outline-variant focus-within:ring-2 focus-within:ring-primary transition-all&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-secondary mr-2&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;search&lt;/span&gt;
+&lt;input class=&quot;bg-transparent border-none outline-none text-body-md w-48 placeholder-secondary&quot; placeholder=&quot;Search restaurants...&quot; type=&quot;text&quot;/&gt;
+&lt;/div&gt;
+&lt;button class=&quot;p-2 text-secondary hover:bg-primary-container/10 rounded-full transition-colors duration-300 scale-95 duration-200&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;shopping_cart&lt;/span&gt;
+&lt;/button&gt;
+&lt;button class=&quot;p-2 text-secondary hover:bg-primary-container/10 rounded-full transition-colors duration-300 scale-95 duration-200&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;notifications&lt;/span&gt;
+&lt;/button&gt;
+&lt;button class=&quot;flex items-center gap-2 hover:bg-primary-container/10 p-2 rounded-full transition-colors duration-300&quot;&gt;
+&lt;img alt=&quot;User avatar&quot; class=&quot;w-10 h-10 rounded-full object-cover border border-outline-variant&quot; data-alt=&quot;A small circular avatar image showing a professional, modern culinary chef in a minimalist kitchen setting with warm lighting.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuD9kdhwcBi6unuhVLXaipYTc2gyRCCVr7wqI8_nkh9-lWvElTfngGBu5QD5rNA_EiR0AEtCMxKr_rXOFBsnJr4bIBsLc8UNmRnvLIquwEUBYmqq53A3eGpE5nlEupnZ_zlpQ43t1K0fePlkQliG1L8SP-g-djEzeOjmXfXdECeJJZlLJ0jrtSxRVTNYDrHjNt6QFvfYBEOOEsE0f8kVemC1rJZt3UOrmguvvLUefSpQ30TRDlm0H655P9vJ8wH7AHiPYQD_FGNEem30&quot;/&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/header&gt;
+&lt;!-- Main Content Canvas --&gt;
+&lt;main class=&quot;pt-24 pb-xl px-margin-mobile md:px-margin-desktop max-w-[1440px] mx-auto&quot;&gt;
+&lt;!-- Search &amp; Filter Header (Mobile optimized) --&gt;
+&lt;section class=&quot;mb-lg md:hidden&quot;&gt;
+&lt;div class=&quot;flex items-center bg-surface-container-highest rounded-xl px-4 py-3 mb-md border border-outline-variant focus-within:ring-2 focus-within:ring-primary transition-all shadow-ambient-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-secondary mr-2&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;search&lt;/span&gt;
+&lt;input class=&quot;bg-transparent border-none outline-none text-body-md w-full placeholder-secondary&quot; placeholder=&quot;Search restaurants, cuisines...&quot; type=&quot;text&quot;/&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;!-- Dynamic Header &amp; Sorting --&gt;
+&lt;div class=&quot;flex flex-col md:flex-row justify-between items-start md:items-end mb-md gap-4&quot;&gt;
+&lt;div&gt;
+&lt;h2 class=&quot;font-headline-md text-headline-md text-on-surface mb-2&quot;&gt;Explore Culinary Excellence&lt;/h2&gt;
+&lt;p class=&quot;font-body-md text-body-md text-secondary&quot;&gt;Discover AI-curated dining experiences near you.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;relative group z-10&quot;&gt;
+&lt;button class=&quot;flex items-center gap-2 bg-surface border border-outline-variant px-4 py-2 rounded-lg font-label-md text-label-md text-on-surface hover:bg-surface-container-low transition-colors shadow-ambient-md&quot; id=&quot;sortBtn&quot;&gt;
+&lt;span&gt;Sort by: Recommended&lt;/span&gt;
+&lt;span class=&quot;material-symbols-outlined text-secondary&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;expand_more&lt;/span&gt;
+&lt;/button&gt;
+&lt;!-- Dropdown --&gt;
+&lt;div class=&quot;absolute right-0 top-full mt-2 w-48 bg-surface border border-outline-variant rounded-lg shadow-ambient-lg hidden opacity-0 group-hover:block group-hover:opacity-100 transition-opacity duration-200 glass-panel&quot;&gt;
+&lt;ul class=&quot;py-2&quot;&gt;
+&lt;li&gt;&lt;button class=&quot;w-full text-left px-4 py-2 hover:bg-primary-container/10 font-body-md text-body-md text-on-surface&quot;&gt;Recommended&lt;/button&gt;&lt;/li&gt;
+&lt;li&gt;&lt;button class=&quot;w-full text-left px-4 py-2 hover:bg-primary-container/10 font-body-md text-body-md text-on-surface&quot;&gt;Highest Rated&lt;/button&gt;&lt;/li&gt;
+&lt;li&gt;&lt;button class=&quot;w-full text-left px-4 py-2 hover:bg-primary-container/10 font-body-md text-body-md text-on-surface&quot;&gt;Delivery Time&lt;/button&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Horizontal Filter Chips --&gt;
+&lt;div class=&quot;flex overflow-x-auto hide-scrollbar gap-sm mb-lg pb-2&quot;&gt;
+&lt;button class=&quot;filter-chip active flex-shrink-0 px-6 py-2 rounded-full border border-primary bg-primary text-on-primary font-label-md text-label-md transition-all shadow-ambient-md&quot;&gt;All&lt;/button&gt;
+&lt;button class=&quot;filter-chip flex-shrink-0 px-6 py-2 rounded-full border border-outline-variant bg-surface text-on-surface hover:bg-primary-container/10 hover:border-primary/50 font-label-md text-label-md transition-all&quot;&gt;Italian&lt;/button&gt;
+&lt;button class=&quot;filter-chip flex-shrink-0 px-6 py-2 rounded-full border border-outline-variant bg-surface text-on-surface hover:bg-primary-container/10 hover:border-primary/50 font-label-md text-label-md transition-all&quot;&gt;Sushi&lt;/button&gt;
+&lt;button class=&quot;filter-chip flex-shrink-0 px-6 py-2 rounded-full border border-outline-variant bg-surface text-on-surface hover:bg-primary-container/10 hover:border-primary/50 font-label-md text-label-md transition-all&quot;&gt;Burgers&lt;/button&gt;
+&lt;button class=&quot;filter-chip flex-shrink-0 px-6 py-2 rounded-full border border-outline-variant bg-surface text-on-surface hover:bg-primary-container/10 hover:border-primary/50 font-label-md text-label-md transition-all&quot;&gt;Vegan&lt;/button&gt;
+&lt;button class=&quot;filter-chip flex-shrink-0 px-6 py-2 rounded-full border border-outline-variant bg-surface text-on-surface hover:bg-primary-container/10 hover:border-primary/50 font-label-md text-label-md transition-all&quot;&gt;Fine Dining&lt;/button&gt;
+&lt;/div&gt;
+&lt;!-- Restaurant Grid (Bento style arrangement) --&gt;
+&lt;div class=&quot;grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md lg:gap-lg&quot;&gt;
+&lt;!-- Card 1: Featured (Takes up more space or prominent styling) --&gt;
+&lt;article class=&quot;glass-panel rounded-xl overflow-hidden shadow-ambient-md hover:shadow-ambient-lg transition-all duration-300 transform hover:-translate-y-1 md:col-span-2 lg:col-span-2 relative group cursor-pointer&quot; data-category=&quot;Italian&quot;&gt;
+&lt;div class=&quot;relative h-64 md:h-80 w-full&quot;&gt;
+&lt;img alt=&quot;Bistro Luxe Food&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A top-down view of a luxurious spread of authentic Italian pasta, wood-fired pizza, and vibrant salads on a rustic wooden table, beautifully lit by warm, inviting light. The scene feels premium and appetizing, fitting a high-end modern epicurean aesthetic.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuBpg1W4CJbgKbztrvjk3y31CKUQBd6cJwJj3OT36aTQj5POXcAYQi33DRvYSZajs161_f9A6Fzwk5GfHVQV8mdFz84WloQ3yCCenIwfwz0Uyo-aNhvARCrEHcFdDIcyFXonp-RxKqbiV5pliYkH7gO0D1zDhnE01SYRrawiWhVK1Nhmr3eyLN5KlL7Iy2B8EU5kwvT9KxDPorBXU9amzqgVDlZK26wie_5m9aTcb-yvDbpZyD35BCsCCfHJycd-NsTYqlNVjgQmYres&quot;/&gt;
+&lt;div class=&quot;absolute inset-0 bg-gradient-to-t from-black/70 to-transparent&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;absolute top-4 left-4 flex gap-2&quot;&gt;
+&lt;span class=&quot;bg-primary/90 backdrop-blur-md text-white px-3 py-1 rounded-full font-label-md text-label-md flex items-center gap-1 shadow-sm&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[16px]&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;auto_awesome&lt;/span&gt; AI Recommended
+                        &lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;absolute top-4 right-4 bg-surface/90 backdrop-blur-md rounded-full p-2 text-on-surface shadow-sm hover:text-primary transition-colors&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;favorite&lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;absolute bottom-4 left-4 right-4 text-white&quot;&gt;
+&lt;div class=&quot;flex justify-between items-end&quot;&gt;
+&lt;div&gt;
+&lt;h3 class=&quot;font-headline-md text-headline-md mb-1&quot;&gt;Bistro Luxe&lt;/h3&gt;
+&lt;p class=&quot;font-body-md text-body-md opacity-90&quot;&gt;Italian • Fine Dining • $$$&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;bg-surface/90 backdrop-blur-md text-on-surface px-3 py-2 rounded-lg font-headline-sm text-headline-sm flex items-center gap-1 shadow-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-primary&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;star&lt;/span&gt; 4.9
+                            &lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-4 bg-surface flex justify-between items-center border-t border-outline-variant/30&quot;&gt;
+&lt;div class=&quot;flex items-center gap-4 text-secondary font-body-md text-body-md&quot;&gt;
+&lt;span class=&quot;flex items-center gap-1&quot;&gt;&lt;span class=&quot;material-symbols-outlined text-[18px]&quot;&gt;schedule&lt;/span&gt; 25-35 min&lt;/span&gt;
+&lt;span class=&quot;flex items-center gap-1&quot;&gt;&lt;span class=&quot;material-symbols-outlined text-[18px]&quot;&gt;directions_bike&lt;/span&gt; Free Delivery&lt;/span&gt;
+&lt;/div&gt;
+&lt;span class=&quot;text-primary font-label-md text-label-md bg-primary-container/10 px-3 py-1 rounded-full&quot;&gt;Open Now&lt;/span&gt;
+&lt;/div&gt;
+&lt;/article&gt;
+&lt;!-- Card 2 --&gt;
+&lt;article class=&quot;glass-panel rounded-xl overflow-hidden shadow-ambient-md hover:shadow-ambient-lg transition-all duration-300 transform hover:-translate-y-1 relative group cursor-pointer&quot; data-category=&quot;Sushi&quot;&gt;
+&lt;div class=&quot;relative h-48 w-full&quot;&gt;
+&lt;img alt=&quot;Nomad Sushi Food&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;Close up, high quality macro photography of premium omakase sushi pieces lined up on a sleek dark slate board. The lighting highlights the fresh, glossy texture of the fish against the minimalist, modern background.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuBBwEzzQd4xBEGuLO2syGNnXZ0A-sIKAoZ-BtRnGHi1UdtnNXE3vx_j4vCPWLNb9pAVb9fIWA8lUzd_hqQDMwsE3qj5KAuRmyEz4uURm1VnOF0YpkoqJPxtFh25GPwvDAA3IXmbGjStjnRPKtPdJtPEyaN3UcGOJahY2N3JcA8b4jwWFFHUzr14ze9WqCN5HFGEgQF2rpYI935lwDbX8BTtBzsXDnA-O_SIkbNqXP42cMWMU-4qg7X6faUxJSKcg73Wz95MxIdPvIE-&quot;/&gt;
+&lt;div class=&quot;absolute inset-0 bg-gradient-to-t from-black/60 to-transparent&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;absolute top-4 right-4 bg-surface/90 backdrop-blur-md rounded-full p-2 text-on-surface shadow-sm hover:text-primary transition-colors&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;favorite&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-4 bg-surface&quot;&gt;
+&lt;div class=&quot;flex justify-between items-start mb-2&quot;&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-surface&quot;&gt;Nomad Sushi&lt;/h3&gt;
+&lt;div class=&quot;flex items-center gap-1 font-label-md text-label-md text-on-surface bg-surface-container-highest px-2 py-1 rounded-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-primary text-[14px]&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;star&lt;/span&gt; 4.8
+                        &lt;/div&gt;
+&lt;/div&gt;
+&lt;p class=&quot;font-body-md text-body-md text-secondary mb-4&quot;&gt;Japanese • Sushi • $$&lt;/p&gt;
+&lt;div class=&quot;flex justify-between items-center pt-3 border-t border-outline-variant/30 text-secondary font-caption text-caption&quot;&gt;
+&lt;span class=&quot;flex items-center gap-1&quot;&gt;&lt;span class=&quot;material-symbols-outlined text-[16px]&quot;&gt;schedule&lt;/span&gt; 15-25 min&lt;/span&gt;
+&lt;span class=&quot;text-on-secondary-fixed-variant bg-secondary-container px-2 py-1 rounded-md&quot;&gt;High Demand&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/article&gt;
+&lt;!-- Card 3 --&gt;
+&lt;article class=&quot;glass-panel rounded-xl overflow-hidden shadow-ambient-md hover:shadow-ambient-lg transition-all duration-300 transform hover:-translate-y-1 relative group cursor-pointer&quot; data-category=&quot;Vegan&quot;&gt;
+&lt;div class=&quot;relative h-48 w-full&quot;&gt;
+&lt;img alt=&quot;The Green Garden Food&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A bright, airy photo of a vibrant, beautifully plated plant-based grain bowl with fresh avocado, roasted chickpeas, and colorful microgreens on a clean, light-colored ceramic plate, embodying a fresh, modern aesthetic.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuCl569glGVFYeyjXPAONbQ9h11R5UjYAEkaLDe1khZxaYck2nGkWq8Syhc3Lkr8p8VfpeMhaZdLNe5RkQ71gF6Pa-d9MohFHAqyf6QBP4eqXRKEEgcITBB9TVusKAVX0HUPDCoUWDb_ewMWhib2qg3eUtUN_XwM9BMaatQKSrPAW39mAflgViY0mChvX9WYEWik80-Wsef-SFkeTQg-677ZO7OcXvRmR4KOQROI_M8NFepsfeidkeEMTpVeR1UxQEK9WQcxxS0kAJ7y&quot;/&gt;
+&lt;div class=&quot;absolute inset-0 bg-gradient-to-t from-black/60 to-transparent&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;absolute top-4 left-4 flex gap-2&quot;&gt;
+&lt;span class=&quot;bg-surface/90 backdrop-blur-md text-on-surface px-3 py-1 rounded-full font-label-md text-label-md flex items-center shadow-sm&quot;&gt;
+                            Eco-Packaging
+                        &lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;absolute top-4 right-4 bg-surface/90 backdrop-blur-md rounded-full p-2 text-on-surface shadow-sm hover:text-primary transition-colors&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;favorite&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-4 bg-surface&quot;&gt;
+&lt;div class=&quot;flex justify-between items-start mb-2&quot;&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-surface&quot;&gt;The Green Garden&lt;/h3&gt;
+&lt;div class=&quot;flex items-center gap-1 font-label-md text-label-md text-on-surface bg-surface-container-highest px-2 py-1 rounded-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-primary text-[14px]&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;star&lt;/span&gt; 4.7
+                        &lt;/div&gt;
+&lt;/div&gt;
+&lt;p class=&quot;font-body-md text-body-md text-secondary mb-4&quot;&gt;Vegan • Healthy • $&lt;/p&gt;
+&lt;div class=&quot;flex justify-between items-center pt-3 border-t border-outline-variant/30 text-secondary font-caption text-caption&quot;&gt;
+&lt;span class=&quot;flex items-center gap-1&quot;&gt;&lt;span class=&quot;material-symbols-outlined text-[16px]&quot;&gt;schedule&lt;/span&gt; 20-30 min&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/article&gt;
+&lt;!-- Card 4 --&gt;
+&lt;article class=&quot;glass-panel rounded-xl overflow-hidden shadow-ambient-md hover:shadow-ambient-lg transition-all duration-300 transform hover:-translate-y-1 relative group cursor-pointer&quot; data-category=&quot;Burgers&quot;&gt;
+&lt;div class=&quot;relative h-48 w-full&quot;&gt;
+&lt;img alt=&quot;Prime Burger Joint&quot; class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A decadent, gourmet burger with melted artisanal cheese, crispy bacon, and fresh greens on a toasted brioche bun, presented on a minimalist metal tray against a dark moody background, emphasizing high-quality ingredients.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuDo19eUWluFurV3evbDpObmj-SYrojeXr7FfPA_JBjuvZ8Dba128GnJKvUZx2mu69khAu2ZyrBHqhWvfcE1xeH3LCUUm_bmgT1CnS8KWbdtZNMJRF-Yi6WlKd89H0xpXlCf-r1xlZTVqwvxM7iXRFV70RU3fx2aicHVkW5baHQdyQct55KceKkUqKr3kCQ7u57lXXElGNjbMdv5xiNu3WnCRgF-aLSYikjnNnhQvDCn81Mcc4TfzTHekwsesq0cxFQXlaYpSBFwn7LS&quot;/&gt;
+&lt;div class=&quot;absolute inset-0 bg-gradient-to-t from-black/60 to-transparent&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;absolute top-4 right-4 bg-surface/90 backdrop-blur-md rounded-full p-2 text-on-surface shadow-sm hover:text-primary transition-colors&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 0;&quot;&gt;favorite&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;p-4 bg-surface&quot;&gt;
+&lt;div class=&quot;flex justify-between items-start mb-2&quot;&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-surface&quot;&gt;Iron Smash&lt;/h3&gt;
+&lt;div class=&quot;flex items-center gap-1 font-label-md text-label-md text-on-surface bg-surface-container-highest px-2 py-1 rounded-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-primary text-[14px]&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;star&lt;/span&gt; 4.5
+                        &lt;/div&gt;
+&lt;/div&gt;
+&lt;p class=&quot;font-body-md text-body-md text-secondary mb-4&quot;&gt;American • Burgers • $$&lt;/p&gt;
+&lt;div class=&quot;flex justify-between items-center pt-3 border-t border-outline-variant/30 text-secondary font-caption text-caption&quot;&gt;
+&lt;span class=&quot;flex items-center gap-1&quot;&gt;&lt;span class=&quot;material-symbols-outlined text-[16px]&quot;&gt;schedule&lt;/span&gt; 35-45 min&lt;/span&gt;
+&lt;span class=&quot;flex items-center gap-1&quot;&gt;&lt;span class=&quot;material-symbols-outlined text-[16px]&quot;&gt;local_fire_department&lt;/span&gt; Trending&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/article&gt;
+&lt;/div&gt;
+&lt;/main&gt;
+&lt;script&gt;
+        // Fake Filtering Logic for interactive demonstration
+        document.addEventListener(&#x27;DOMContentLoaded&#x27;, () =&gt; {
+            const chips = document.querySelectorAll(&#x27;.filter-chip&#x27;);
+            const cards = document.querySelectorAll(&#x27;article[data-category]&#x27;);
+
+            chips.forEach(chip =&gt; {
+                chip.addEventListener(&#x27;click&#x27;, () =&gt; {
+                    // Reset active state
+                    chips.forEach(c =&gt; {
+                        c.classList.remove(&#x27;bg-primary&#x27;, &#x27;text-on-primary&#x27;, &#x27;border-primary&#x27;);
+                        c.classList.add(&#x27;bg-surface&#x27;, &#x27;text-on-surface&#x27;, &#x27;border-outline-variant&#x27;);
+                    });
+                    
+                    // Set clicked to active
+                    chip.classList.add(&#x27;bg-primary&#x27;, &#x27;text-on-primary&#x27;, &#x27;border-primary&#x27;);
+                    chip.classList.remove(&#x27;bg-surface&#x27;, &#x27;text-on-surface&#x27;, &#x27;border-outline-variant&#x27;);
+
+                    const category = chip.textContent.trim();
+
+                    // Filter cards
+                    cards.forEach(card =&gt; {
+                        if (category === &#x27;All&#x27; || card.getAttribute(&#x27;data-category&#x27;) === category) {
+                            card.style.display = &#x27;block&#x27;;
+                            // Subtle re-entry animation
+                            card.style.animation = &#x27;none&#x27;;
+                            card.offsetHeight; // trigger reflow
+                            card.style.animation = &#x27;fadeIn 0.3s ease-in forwards&#x27;;
+                        } else {
+                            card.style.display = &#x27;none&#x27;;
+                        }
+                    });
+                });
+            });
+            
+            // Simple sort dropdown interaction (mobile support)
+            const sortBtn = document.getElementById(&#x27;sortBtn&#x27;);
+            sortBtn.addEventListener(&#x27;click&#x27;, (e) =&gt; {
+                if(window.innerWidth &lt; 768) {
+                   const dropdown = sortBtn.nextElementSibling;
+                   dropdown.classList.toggle(&#x27;hidden&#x27;);
+                   dropdown.classList.toggle(&#x27;opacity-0&#x27;);
+                   dropdown.classList.toggle(&#x27;opacity-100&#x27;);
+                }
+            });
+        });
+    &lt;/script&gt;
+&lt;style&gt;
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    &lt;/style&gt;
+
+&lt;script&gt;
+(function () {
+  function alreadyHandled(el) {
+    if (el.hasAttribute(&#x27;onclick&#x27;)) return true;
+    if (el.tagName === &#x27;A&#x27; &amp;&amp; el.getAttribute(&#x27;href&#x27;) &amp;&amp; el.getAttribute(&#x27;href&#x27;) !== &#x27;#&#x27;) return true;
+    if (el.tagName === &#x27;BUTTON&#x27; &amp;&amp; el.type === &#x27;submit&#x27;) return true;
+    return false;
+  }
+  function showPing(el) {
+    var ping = document.createElement(&#x27;div&#x27;);
+    ping.textContent = &#x27;\u2713&#x27;;
+    ping.style.cssText = &#x27;position:absolute;pointer-events:none;font-size:11px;&#x27; +
+      &#x27;color:#00E6A8;font-weight:700;opacity:0;transition:opacity .15s,transform .4s;&#x27; +
+      &#x27;transform:translateY(0);z-index:99999;&#x27;;
+    var rect = el.getBoundingClientRect();
+    ping.style.left = (rect.right - 14 + window.scrollX) + &#x27;px&#x27;;
+    ping.style.top = (rect.top - 6 + window.scrollY) + &#x27;px&#x27;;
+    document.body.appendChild(ping);
+    requestAnimationFrame(function () { ping.style.opacity = &#x27;1&#x27;; });
+    setTimeout(function () {
+      ping.style.opacity = &#x27;0&#x27;;
+      ping.style.transform = &#x27;translateY(-10px)&#x27;;
+    }, 400);
+    setTimeout(function () { ping.remove(); }, 800);
+    el.style.transition = el.style.transition || &#x27;transform .12s&#x27;;
+    var prevTransform = el.style.transform;
+    el.style.transform = &#x27;scale(0.97)&#x27;;
+    setTimeout(function () { el.style.transform = prevTransform || &#x27;&#x27;; }, 120);
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;button, a, [role=&quot;button&quot;], [data-clickable]&#x27;);
+    if (!el || alreadyHandled(el)) return;
+    showPing(el);
+  }, true);
+})();
+&lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  var NAV = {&quot;tokens&quot;: [[&quot;admin&quot;, &quot;dashboard&quot;], [&quot;discover&quot;, &quot;restaurants&quot;], [&quot;bistro&quot;, &quot;luxe&quot;, &quot;menu&quot;], [&quot;secure&quot;, &quot;checkout&quot;]], &quot;current&quot;: 1};
+  function norm(s) { return (s || &#x27;&#x27;).toLowerCase().replace(/[^a-z0-9]+/g, &#x27; &#x27;).trim(); }
+  function singular(w) { return (w.length &gt; 3 &amp;&amp; w.charAt(w.length - 1) === &#x27;s&#x27;) ? w.slice(0, -1) : w; }
+  function matchScreen(text) {
+    var words = norm(text).split(&#x27; &#x27;).filter(Boolean).map(singular);
+    if (!words.length) return -1;
+    var wordSet = {};
+    words.forEach(function (w) { wordSet[w] = true; });
+    for (var i = 0; i &lt; NAV.tokens.length; i++) {
+      var toks = NAV.tokens[i];
+      for (var j = 0; j &lt; toks.length; j++) {
+        if (wordSet[singular(toks[j])]) return i;
+      }
+    }
+    return -1;
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;a, button, [role=&quot;button&quot;], [data-clickable], li, [class*=&quot;card&quot;], [class*=&quot;nav&quot;] a, [class*=&quot;menu&quot;] a&#x27;);
+    if (!el) return;
+    var text = (el.innerText || el.textContent || &#x27;&#x27;).trim();
+    if (!text || text.length &gt; 60) return;  // a long blob isn&#x27;t a nav label
+    var idx = matchScreen(text);
+    if (idx &lt; 0 || idx === NAV.current) return;  // no match, or already here
+    if (window.parent &amp;&amp; window.parent.ppShowScreen) {
+      e.preventDefault();
+      e.stopImmediatePropagation();  // beat the &quot;#&quot; link and the safety-net ping
+      window.parent.ppShowScreen(idx);
+    }
+  }, true);
+})();
+&lt;/script&gt;
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div class="pp-screen" id="pp-screen-2" style="display:none"><iframe class="pp-frame" srcdoc="&lt;!DOCTYPE html&gt;
+
+&lt;html class=&quot;light&quot; lang=&quot;en&quot;&gt;&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;/&gt;
+&lt;meta content=&quot;width=device-width, initial-scale=1.0&quot; name=&quot;viewport&quot;/&gt;
+&lt;title&gt;Restaurant Menu - DineFlow&lt;/title&gt;
+&lt;!-- Fonts --&gt;
+&lt;link href=&quot;https://fonts.googleapis.com&quot; rel=&quot;preconnect&quot;/&gt;
+&lt;link crossorigin=&quot;&quot; href=&quot;https://fonts.gstatic.com&quot; rel=&quot;preconnect&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&amp;amp;family=Inter:wght@400;500;600&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;!-- Material Icons --&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;style&gt;
+        .material-symbols-outlined {
+            font-variation-settings: &#x27;FILL&#x27; 0, &#x27;wght&#x27; 400, &#x27;GRAD&#x27; 0, &#x27;opsz&#x27; 24;
+        }
+        .icon-fill {
+            font-variation-settings: &#x27;FILL&#x27; 1;
+        }
+    &lt;/style&gt;
+&lt;!-- Tailwind CSS --&gt;
+&lt;script src=&quot;https://cdn.tailwindcss.com?plugins=forms,container-queries&quot;&gt;&lt;/script&gt;
+&lt;script id=&quot;tailwind-config&quot;&gt;
+        tailwind.config = {
+          darkMode: &quot;class&quot;,
+          theme: {
+            extend: {
+              &quot;colors&quot;: {
+                &quot;primary-container&quot;: &quot;#ff7043&quot;,
+                &quot;primary&quot;: &quot;#ac3509&quot;,
+                &quot;on-primary-container&quot;: &quot;#641800&quot;,
+                &quot;surface-container-highest&quot;: &quot;#e3e1ec&quot;,
+                &quot;on-secondary-fixed&quot;: &quot;#1c1b1b&quot;,
+                &quot;primary-fixed-dim&quot;: &quot;#ffb59f&quot;,
+                &quot;surface-bright&quot;: &quot;#fbf8ff&quot;,
+                &quot;on-secondary&quot;: &quot;#ffffff&quot;,
+                &quot;secondary-fixed&quot;: &quot;#e5e2e1&quot;,
+                &quot;tertiary-container&quot;: &quot;#9d9c98&quot;,
+                &quot;on-secondary-fixed-variant&quot;: &quot;#474746&quot;,
+                &quot;outline&quot;: &quot;#8d7169&quot;,
+                &quot;on-primary-fixed&quot;: &quot;#3a0a00&quot;,
+                &quot;on-primary&quot;: &quot;#ffffff&quot;,
+                &quot;secondary-fixed-dim&quot;: &quot;#c8c6c5&quot;,
+                &quot;error&quot;: &quot;#ba1a1a&quot;,
+                &quot;on-primary-fixed-variant&quot;: &quot;#852300&quot;,
+                &quot;on-surface-variant&quot;: &quot;#59413a&quot;,
+                &quot;outline-variant&quot;: &quot;#e0bfb6&quot;,
+                &quot;surface-container&quot;: &quot;#eeedf7&quot;,
+                &quot;on-background&quot;: &quot;#1a1b22&quot;,
+                &quot;tertiary&quot;: &quot;#5e5e5b&quot;,
+                &quot;on-tertiary-fixed&quot;: &quot;#1b1c19&quot;,
+                &quot;inverse-primary&quot;: &quot;#ffb59f&quot;,
+                &quot;surface-tint&quot;: &quot;#ac3509&quot;,
+                &quot;on-tertiary-fixed-variant&quot;: &quot;#474744&quot;,
+                &quot;inverse-surface&quot;: &quot;#2f3038&quot;,
+                &quot;on-error&quot;: &quot;#ffffff&quot;,
+                &quot;inverse-on-surface&quot;: &quot;#f1effa&quot;,
+                &quot;secondary&quot;: &quot;#5f5e5e&quot;,
+                &quot;secondary-container&quot;: &quot;#e2dfde&quot;,
+                &quot;surface-container-high&quot;: &quot;#e8e7f1&quot;,
+                &quot;on-secondary-container&quot;: &quot;#636262&quot;,
+                &quot;on-surface&quot;: &quot;#1a1b22&quot;,
+                &quot;tertiary-fixed&quot;: &quot;#e4e2dd&quot;,
+                &quot;surface-container-low&quot;: &quot;#f4f2fd&quot;,
+                &quot;primary-fixed&quot;: &quot;#ffdbd0&quot;,
+                &quot;on-tertiary-container&quot;: &quot;#333431&quot;,
+                &quot;error-container&quot;: &quot;#ffdad6&quot;,
+                &quot;surface-dim&quot;: &quot;#dad9e3&quot;,
+                &quot;surface&quot;: &quot;#fbf8ff&quot;,
+                &quot;background&quot;: &quot;#fbf8ff&quot;,
+                &quot;on-tertiary&quot;: &quot;#ffffff&quot;,
+                &quot;surface-container-lowest&quot;: &quot;#ffffff&quot;,
+                &quot;on-error-container&quot;: &quot;#93000a&quot;,
+                &quot;tertiary-fixed-dim&quot;: &quot;#c8c6c2&quot;,
+                &quot;surface-variant&quot;: &quot;#e3e1ec&quot;
+              },
+              &quot;borderRadius&quot;: {
+                &quot;DEFAULT&quot;: &quot;0.25rem&quot;,
+                &quot;lg&quot;: &quot;0.5rem&quot;,
+                &quot;xl&quot;: &quot;0.75rem&quot;,
+                &quot;full&quot;: &quot;9999px&quot;
+              },
+              &quot;spacing&quot;: {
+                &quot;margin-mobile&quot;: &quot;16px&quot;,
+                &quot;md&quot;: &quot;24px&quot;,
+                &quot;sm&quot;: &quot;12px&quot;,
+                &quot;lg&quot;: &quot;48px&quot;,
+                &quot;base&quot;: &quot;8px&quot;,
+                &quot;xs&quot;: &quot;4px&quot;,
+                &quot;gutter&quot;: &quot;24px&quot;,
+                &quot;xl&quot;: &quot;80px&quot;,
+                &quot;margin-desktop&quot;: &quot;64px&quot;
+              },
+              &quot;fontFamily&quot;: {
+                &quot;body-lg&quot;: [&quot;Inter&quot;],
+                &quot;headline-sm&quot;: [&quot;Geist&quot;],
+                &quot;caption&quot;: [&quot;Inter&quot;],
+                &quot;display-lg&quot;: [&quot;Geist&quot;],
+                &quot;display-lg-mobile&quot;: [&quot;Geist&quot;],
+                &quot;headline-md&quot;: [&quot;Geist&quot;],
+                &quot;label-md&quot;: [&quot;Geist&quot;],
+                &quot;body-md&quot;: [&quot;Inter&quot;]
+              },
+              &quot;fontSize&quot;: {
+                &quot;body-lg&quot;: [&quot;18px&quot;, {&quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}],
+                &quot;headline-sm&quot;: [&quot;20px&quot;, {&quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;caption&quot;: [&quot;12px&quot;, {&quot;lineHeight&quot;: &quot;16px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}],
+                &quot;display-lg&quot;: [&quot;48px&quot;, {&quot;lineHeight&quot;: &quot;56px&quot;, &quot;letterSpacing&quot;: &quot;-0.02em&quot;, &quot;fontWeight&quot;: &quot;700&quot;}],
+                &quot;display-lg-mobile&quot;: [&quot;32px&quot;, {&quot;lineHeight&quot;: &quot;40px&quot;, &quot;letterSpacing&quot;: &quot;-0.01em&quot;, &quot;fontWeight&quot;: &quot;700&quot;}],
+                &quot;headline-md&quot;: [&quot;24px&quot;, {&quot;lineHeight&quot;: &quot;32px&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;label-md&quot;: [&quot;14px&quot;, {&quot;lineHeight&quot;: &quot;20px&quot;, &quot;letterSpacing&quot;: &quot;0.05em&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;body-md&quot;: [&quot;16px&quot;, {&quot;lineHeight&quot;: &quot;24px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}]
+              }
+            },
+          },
+        }
+    &lt;/script&gt;
+&lt;/head&gt;
+&lt;body class=&quot;bg-background text-on-background font-body-md min-h-screen flex flex-col pt-20&quot;&gt;
+&lt;!-- TopNavBar Shared Component --&gt;
+&lt;nav class=&quot;fixed top-0 w-full z-50 flex justify-between items-center px-margin-desktop h-20 bg-surface/80 dark:bg-inverse-surface/80 backdrop-blur-xl border-b border-white/20 shadow-md shadow-md shadow-primary/10 transition-all duration-300&quot;&gt;
+&lt;!-- Brand --&gt;
+&lt;div class=&quot;flex items-center gap-sm&quot;&gt;
+&lt;span class=&quot;font-display-lg text-display-lg-mobile md:text-display-lg text-primary tracking-tight&quot;&gt;DineFlow&lt;/span&gt;
+&lt;/div&gt;
+&lt;!-- Navigation Links (Web) --&gt;
+&lt;div class=&quot;hidden md:flex items-center gap-md&quot;&gt;
+&lt;!-- Marketplace is ACTIVE --&gt;
+&lt;a class=&quot;font-headline-sm text-headline-sm text-primary dark:text-primary-fixed-dim border-b-2 border-primary pb-1 hover:bg-primary-container/10 transition-colors duration-300 scale-95 duration-200&quot; href=&quot;#&quot;&gt;
+                Marketplace
+            &lt;/a&gt;
+&lt;a class=&quot;font-headline-sm text-headline-sm text-secondary dark:text-secondary-fixed hover:text-primary hover:bg-primary-container/10 transition-colors duration-300 scale-95 duration-200&quot; href=&quot;#&quot;&gt;
+                Dashboard
+            &lt;/a&gt;
+&lt;a class=&quot;font-headline-sm text-headline-sm text-secondary dark:text-secondary-fixed hover:text-primary hover:bg-primary-container/10 transition-colors duration-300 scale-95 duration-200&quot; href=&quot;#&quot;&gt;
+                Admin
+            &lt;/a&gt;
+&lt;/div&gt;
+&lt;!-- Trailing Actions --&gt;
+&lt;div class=&quot;flex items-center gap-md&quot;&gt;
+&lt;div class=&quot;flex items-center gap-sm&quot;&gt;
+&lt;button class=&quot;p-2 rounded-full hover:bg-primary-container/10 transition-colors duration-300 scale-95 duration-200 text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; data-icon=&quot;shopping_cart&quot;&gt;shopping_cart&lt;/span&gt;
+&lt;/button&gt;
+&lt;button class=&quot;p-2 rounded-full hover:bg-primary-container/10 transition-colors duration-300 scale-95 duration-200 text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; data-icon=&quot;notifications&quot;&gt;notifications&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;button class=&quot;hidden md:flex font-headline-sm text-headline-sm text-on-primary bg-primary rounded-full px-4 py-2 hover:shadow-lg transition-all&quot;&gt;
+                Profile
+            &lt;/button&gt;
+&lt;!-- Mobile Menu Toggle --&gt;
+&lt;button class=&quot;md:hidden p-2 text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;menu&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/nav&gt;
+&lt;!-- Main Content --&gt;
+&lt;main class=&quot;flex-1 w-full max-w-[1440px] mx-auto pb-xl&quot;&gt;
+&lt;!-- Hero Section --&gt;
+&lt;div class=&quot;relative w-full h-[300px] md:h-[400px]&quot;&gt;
+&lt;div class=&quot;absolute inset-0 bg-cover bg-center&quot; data-alt=&quot;A wide, cinematic shot of a beautifully designed, modern minimalist restaurant interior. The space features smooth concrete textures, warm wooden accents, and soft, diffused natural lighting pouring through large glass windows. The atmosphere is sophisticated, inviting, and impeccably clean, representing the pinnacle of contemporary epicurean dining spaces.&quot; style=&quot;background-image: url(&#x27;https://lh3.googleusercontent.com/aida-public/AB6AXuDKzEm-mv6ycNQkchGkNxfJrGINlRhkatVGv2ov-4f3WZtbcgL9Q9ZEGY7pSvW3RjU52mohGdUCbGqsAs0jEJbcu0tmdKrPlFWkDzY2xwxUjcl6akxhVOYGzhhll2WxW94MW9lvNfAr_TLRVje43IO1HpglwenatK641gFrA0zWQDkgGhKjkrMVuJkI_wSZt-QsCTmY6oN5vSd5KeN5tuzS0Yq0VzHT_2kJsehmV0pFK-OLqjyj8VVn9HkGM5CkyLurrut4svZtzzb9&#x27;)&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;absolute bottom-0 left-0 w-full px-margin-mobile md:px-margin-desktop translate-y-1/2 flex items-end gap-md&quot;&gt;
+&lt;div class=&quot;w-24 h-24 md:w-32 md:h-32 rounded-xl overflow-hidden shadow-lg border-2 border-surface bg-surface flex items-center justify-center&quot;&gt;
+&lt;img class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A minimalist, elegant logo design for a high-end restaurant, featuring clean typography and a subtle geometric emblem in burnt orange on a pristine white background. The aesthetic is modern, professional, and evocative of culinary excellence.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuCL0rB8eno-zynw65P4tYyv0sUXzqsw1WZac16c0hEbEcw0juy7CNTvchVj8Z7IuI915gqa35dx6vrz22L-z-JwVkxK5qUmOI1P-AEp5bRFkI5dtdbewfGI8C03Uvmp3fClf5FH9UCMiRW0kD8WBYNV4I26aijL1ELykKcdwG_N-O_8nKk8ZAbMfoHEvRCLnFAyM7DbYj-nYmzcBfRBPlnAo1KhpaLYjdiEMfhOrVibxQFYPhL0GEaIqshWTeUPSmhPNujD66ub31Su&quot;/&gt;
+&lt;/div&gt;
+&lt;div class=&quot;mb-sm&quot;&gt;
+&lt;h1 class=&quot;font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg text-on-background&quot;&gt;Lumina Gastronomy&lt;/h1&gt;
+&lt;div class=&quot;flex items-center gap-sm mt-xs&quot;&gt;
+&lt;span class=&quot;flex items-center text-primary font-label-md text-label-md bg-primary-container/20 px-2 py-1 rounded-full backdrop-blur-sm&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[16px] mr-1 icon-fill&quot;&gt;star&lt;/span&gt; 4.9 (128 reviews)
+                        &lt;/span&gt;
+&lt;span class=&quot;font-body-md text-body-md text-on-surface-variant flex items-center&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[18px] mr-1&quot;&gt;location_on&lt;/span&gt; Downtown AI District
+                        &lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Spacing for the overlapping hero --&gt;
+&lt;div class=&quot;h-20 md:h-24&quot;&gt;&lt;/div&gt;
+&lt;div class=&quot;px-margin-mobile md:px-margin-desktop flex flex-col lg:flex-row gap-lg&quot;&gt;
+&lt;!-- Left Column: Menu --&gt;
+&lt;div class=&quot;flex-1&quot;&gt;
+&lt;!-- Sticky Category Nav --&gt;
+&lt;div class=&quot;sticky top-20 z-40 bg-background/90 backdrop-blur-md py-4 border-b border-surface-container-highest mb-md overflow-x-auto no-scrollbar&quot;&gt;
+&lt;div class=&quot;flex gap-sm&quot;&gt;
+&lt;button class=&quot;category-btn active px-4 py-2 rounded-full font-label-md text-label-md bg-primary text-on-primary transition-all&quot;&gt;All Items&lt;/button&gt;
+&lt;button class=&quot;category-btn px-4 py-2 rounded-full font-label-md text-label-md bg-surface-container text-on-surface hover:bg-surface-container-high transition-all&quot; data-target=&quot;appetizers&quot;&gt;Appetizers&lt;/button&gt;
+&lt;button class=&quot;category-btn px-4 py-2 rounded-full font-label-md text-label-md bg-surface-container text-on-surface hover:bg-surface-container-high transition-all&quot; data-target=&quot;mains&quot;&gt;Mains&lt;/button&gt;
+&lt;button class=&quot;category-btn px-4 py-2 rounded-full font-label-md text-label-md bg-surface-container text-on-surface hover:bg-surface-container-high transition-all&quot; data-target=&quot;desserts&quot;&gt;Desserts&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Menu Sections --&gt;
+&lt;div class=&quot;space-y-xl&quot;&gt;
+&lt;!-- Appetizers --&gt;
+&lt;section class=&quot;menu-section&quot; id=&quot;appetizers&quot;&gt;
+&lt;h2 class=&quot;font-headline-md text-headline-md text-on-background mb-md&quot;&gt;Appetizers&lt;/h2&gt;
+&lt;div class=&quot;grid grid-cols-1 md:grid-cols-2 gap-md&quot;&gt;
+&lt;!-- Menu Item Card 1 --&gt;
+&lt;div class=&quot;bg-surface/80 backdrop-blur-xl border border-white/20 shadow-md shadow-primary/5 rounded-xl p-sm flex gap-sm hover:shadow-lg transition-all duration-300&quot;&gt;
+&lt;div class=&quot;w-24 h-24 rounded-lg overflow-hidden flex-shrink-0&quot;&gt;
+&lt;img class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A top-down view of a beautifully plated beef tartare on a sleek ceramic dish. The tartare is garnished with microgreens, a perfectly round quail egg yolk in the center, and delicate dots of aioli around the plate. Bright, clean lighting emphasizes the freshness and rich red color of the meat, setting a high-end culinary tone.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuCABLYuWqz7EHcCy7kf-oA7QUZcEUWk_IEc-cuFkhN8ER1zfTwBYIYYi5sSfANYMhNd5tljTGfzZDjfv2oR6-5FcSkdaYq3eALCgpZH5nR9uBclzSer9_ClWa_Z9sAeM79OCTfShqy_goj_qJF_GfSwRz3FiqtaYnH5zJnQb4mCu6UMldIK3iARpQvU0BNNxPwPoW7VE8rGzEdaBM4Pg-S48tNl3S38RemwRsUgOq4ZWNhStiNFrUZImOOXvfqHmmFfIR_Rmr3n4z8J&quot;/&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex-1 flex flex-col justify-between&quot;&gt;
+&lt;div&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-background&quot;&gt;Wagyu Tartare&lt;/h3&gt;
+&lt;p class=&quot;font-caption text-caption text-on-surface-variant mt-xs line-clamp-2&quot;&gt;Hand-cut wagyu beef, smoked egg yolk, truffle aioli, served with crisp artisan flatbread.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center justify-between mt-sm&quot;&gt;
+&lt;span class=&quot;font-label-md text-label-md text-primary&quot;&gt;$24.00&lt;/span&gt;
+&lt;button class=&quot;add-to-cart-btn bg-surface-container text-primary hover:bg-primary hover:text-on-primary rounded-full p-2 transition-colors flex items-center justify-center&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[20px]&quot;&gt;add&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;!-- Mains --&gt;
+&lt;section class=&quot;menu-section&quot; id=&quot;mains&quot;&gt;
+&lt;h2 class=&quot;font-headline-md text-headline-md text-on-background mb-md&quot;&gt;Mains&lt;/h2&gt;
+&lt;div class=&quot;grid grid-cols-1 md:grid-cols-2 gap-md&quot;&gt;
+&lt;!-- Menu Item Card 2 --&gt;
+&lt;div class=&quot;bg-surface/80 backdrop-blur-xl border border-white/20 shadow-md shadow-primary/5 rounded-xl p-sm flex gap-sm hover:shadow-lg transition-all duration-300&quot;&gt;
+&lt;div class=&quot;w-24 h-24 rounded-lg overflow-hidden flex-shrink-0&quot;&gt;
+&lt;img class=&quot;w-full h-full object-cover&quot; data-alt=&quot;A close-up, highly detailed food photography shot of steaming Truffle Tagliatelle in a minimalist white bowl. The pasta is perfectly al dente and coated in a glossy, rich sauce. Generous shavings of fresh black truffle and a light dusting of parmesan adorn the top. The lighting is soft and directional, creating an appetizing and luxurious mood.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuCej7T3U-n5egDwx7PntxOdV7DAsHy83AeXx6OIoOE9Sw6wvgQLmLljmc-PG8CzlHQSVCLvMvNCp0VvziFYtZDzJH9RfiBLmCeGKhFdfj-MG3EgxR-YgesSl3AuVil_8QDsMQz_BnyTUOPjvxG8KUyC1yc6iFt7eXRRwccNn0A7NOJpFJPjDT2UApEsgsE6GCNKHdUItyCTnSTlEi1akYcIp3KDoyzlkBexPQ67SENjtlpzfyEfZJaQNP4jzKddewJwiTg0O-OrfG5x&quot;/&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex-1 flex flex-col justify-between&quot;&gt;
+&lt;div&gt;
+&lt;div class=&quot;flex justify-between items-start&quot;&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-background&quot;&gt;Truffle Tagliatelle&lt;/h3&gt;
+&lt;span class=&quot;bg-primary-container/20 text-primary font-caption text-caption px-2 py-0.5 rounded-full whitespace-nowrap&quot;&gt;AI Pick&lt;/span&gt;
+&lt;/div&gt;
+&lt;p class=&quot;font-caption text-caption text-on-surface-variant mt-xs line-clamp-2&quot;&gt;Handmade pasta, wild mushrooms, rich cream sauce, and generous shavings of fresh black winter truffle.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center justify-between mt-sm&quot;&gt;
+&lt;span class=&quot;font-label-md text-label-md text-primary&quot;&gt;$38.00&lt;/span&gt;
+&lt;button class=&quot;add-to-cart-btn bg-surface-container text-primary hover:bg-primary hover:text-on-primary rounded-full p-2 transition-colors flex items-center justify-center&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[20px]&quot;&gt;add&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Menu Item Card 3 --&gt;
+&lt;div class=&quot;bg-surface/80 backdrop-blur-xl border border-white/20 shadow-md shadow-primary/5 rounded-xl p-sm flex gap-sm hover:shadow-lg transition-all duration-300&quot;&gt;
+&lt;div class=&quot;w-24 h-24 rounded-lg overflow-hidden flex-shrink-0&quot;&gt;
+&lt;img class=&quot;w-full h-full object-cover&quot; data-alt=&quot;An elegant presentation of Yuzu Miso Cod on a dark, textured slate plate. The fish has a beautiful caramelized glaze and rests on a bed of vibrant green bok choy. A delicate drizzle of sauce circles the plate. The lighting is dramatic and moody, highlighting the gloss of the glaze and the contrasting colors, fitting for a modern epicurean aesthetic.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuBKFiOBz7r5vquQWlUYRjbJwfan_K8w1VLqXejVIN1_fHBgX0k8vtSlSQ8knt0h_kw4GPqIYhkCRFjLEzzmDXsSXgnI2rqI5p3U-0gJPGTcBgRqxNLMrDweU7yHV8PM3TMDVYuwZBHpwN4c5gJ5LrhtxJna_oWgLLqfQS-FaojJxpr5bCBiGa7rZh9NC3viLQ0vt24bmnsFyOROb5lTx-XvSuA26eya8N4FBNNJ2_EHvC_TMZ2vevMks42CabQfsn9OjIDoNrchvDH9&quot;/&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex-1 flex flex-col justify-between&quot;&gt;
+&lt;div&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-background&quot;&gt;Yuzu Miso Cod&lt;/h3&gt;
+&lt;p class=&quot;font-caption text-caption text-on-surface-variant mt-xs line-clamp-2&quot;&gt;Sustainably sourced black cod marinated in sweet yuzu miso, served with baby bok choy and ginger foam.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center justify-between mt-sm&quot;&gt;
+&lt;span class=&quot;font-label-md text-label-md text-primary&quot;&gt;$42.00&lt;/span&gt;
+&lt;button class=&quot;add-to-cart-btn bg-surface-container text-primary hover:bg-primary hover:text-on-primary rounded-full p-2 transition-colors flex items-center justify-center&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[20px]&quot;&gt;add&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Right Column: Cart Preview (Desktop) --&gt;
+&lt;div class=&quot;hidden lg:block w-80 flex-shrink-0&quot;&gt;
+&lt;div class=&quot;sticky top-24 bg-surface/90 backdrop-blur-xl border border-outline-variant shadow-lg rounded-xl p-md&quot;&gt;
+&lt;div class=&quot;flex items-center justify-between mb-md pb-sm border-b border-surface-container-highest&quot;&gt;
+&lt;h2 class=&quot;font-headline-sm text-headline-sm text-on-background flex items-center gap-xs&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-primary&quot;&gt;shopping_bag&lt;/span&gt; Your Order
+                        &lt;/h2&gt;
+&lt;span class=&quot;bg-primary text-on-primary font-caption text-caption px-2 py-0.5 rounded-full&quot; id=&quot;cart-badge-desktop&quot;&gt;0&lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;py-xl text-center flex flex-col items-center justify-center text-on-surface-variant&quot; id=&quot;empty-cart-state&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[48px] text-surface-container-highest mb-sm&quot;&gt;restaurant&lt;/span&gt;
+&lt;p class=&quot;font-body-md text-body-md&quot;&gt;Your cart is empty.&lt;/p&gt;
+&lt;p class=&quot;font-caption text-caption&quot;&gt;Add some delicious items from the menu.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;hidden flex-col gap-sm max-h-[400px] overflow-y-auto&quot; id=&quot;cart-items-container&quot;&gt;
+&lt;!-- Items injected here via JS --&gt;
+&lt;/div&gt;
+&lt;div class=&quot;mt-md pt-md border-t border-surface-container-highest hidden&quot; id=&quot;cart-summary&quot;&gt;
+&lt;div class=&quot;flex justify-between font-label-md text-label-md mb-xs&quot;&gt;
+&lt;span class=&quot;text-on-surface-variant&quot;&gt;Subtotal&lt;/span&gt;
+&lt;span class=&quot;text-on-background&quot; id=&quot;cart-subtotal&quot;&gt;$0.00&lt;/span&gt;
+&lt;/div&gt;
+&lt;button class=&quot;w-full mt-sm bg-primary text-on-primary font-label-md text-label-md py-3 rounded-lg hover:shadow-lg shadow-primary/20 transition-all flex justify-between px-4 items-center&quot;&gt;
+&lt;span&gt;Checkout&lt;/span&gt;
+&lt;span class=&quot;material-symbols-outlined text-[18px]&quot;&gt;arrow_forward&lt;/span&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/main&gt;
+&lt;!-- Toast Notification Container --&gt;
+&lt;div class=&quot;fixed bottom-lg left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 pointer-events-none&quot; id=&quot;toast-container&quot;&gt;&lt;/div&gt;
+&lt;!-- Floating Mobile Cart Button --&gt;
+&lt;button class=&quot;lg:hidden fixed bottom-md right-md bg-primary text-on-primary p-4 rounded-full shadow-lg shadow-primary/30 z-40 flex items-center justify-center transition-transform active:scale-95&quot; id=&quot;mobile-cart-btn&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;shopping_bag&lt;/span&gt;
+&lt;span class=&quot;absolute -top-1 -right-1 bg-surface text-primary font-caption text-caption font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-sm hidden&quot; id=&quot;cart-badge-mobile&quot;&gt;0&lt;/span&gt;
+&lt;/button&gt;
+&lt;script&gt;
+        document.addEventListener(&#x27;DOMContentLoaded&#x27;, () =&gt; {
+            let cartCount = 0;
+            const addButtons = document.querySelectorAll(&#x27;.add-to-cart-btn&#x27;);
+            const toastContainer = document.getElementById(&#x27;toast-container&#x27;);
+            const cartBadgeDesktop = document.getElementById(&#x27;cart-badge-desktop&#x27;);
+            const cartBadgeMobile = document.getElementById(&#x27;cart-badge-mobile&#x27;);
+            const emptyCartState = document.getElementById(&#x27;empty-cart-state&#x27;);
+            const cartSummary = document.getElementById(&#x27;cart-summary&#x27;);
+
+            // Add to Cart Logic
+            addButtons.forEach(btn =&gt; {
+                btn.addEventListener(&#x27;click&#x27;, (e) =&gt; {
+                    cartCount++;
+                    updateCartUI();
+                    showToast(&#x27;Item added to cart!&#x27;);
+                    
+                    // Button animation
+                    const icon = btn.querySelector(&#x27;.material-symbols-outlined&#x27;);
+                    icon.textContent = &#x27;check&#x27;;
+                    btn.classList.add(&#x27;bg-primary&#x27;, &#x27;text-on-primary&#x27;);
+                    btn.classList.remove(&#x27;bg-surface-container&#x27;, &#x27;text-primary&#x27;);
+                    
+                    setTimeout(() =&gt; {
+                        icon.textContent = &#x27;add&#x27;;
+                        btn.classList.remove(&#x27;bg-primary&#x27;, &#x27;text-on-primary&#x27;);
+                        btn.classList.add(&#x27;bg-surface-container&#x27;, &#x27;text-primary&#x27;);
+                    }, 1000);
+                });
+            });
+
+            function updateCartUI() {
+                cartBadgeDesktop.textContent = cartCount;
+                cartBadgeMobile.textContent = cartCount;
+                if (cartCount &gt; 0) {
+                    cartBadgeMobile.classList.remove(&#x27;hidden&#x27;);
+                    emptyCartState.classList.add(&#x27;hidden&#x27;);
+                    cartSummary.classList.remove(&#x27;hidden&#x27;);
+                }
+            }
+
+            function showToast(message) {
+                const toast = document.createElement(&#x27;div&#x27;);
+                toast.className = &#x27;bg-inverse-surface text-inverse-on-surface font-label-md text-label-md px-6 py-3 rounded-full shadow-lg transform transition-all duration-300 translate-y-10 opacity-0 flex items-center gap-sm&#x27;;
+                toast.innerHTML = `&lt;span class=&quot;material-symbols-outlined text-[20px] text-primary&quot;&gt;check_circle&lt;/span&gt; ${message}`;
+                
+                toastContainer.appendChild(toast);
+                
+                // Animate in
+                requestAnimationFrame(() =&gt; {
+                    toast.classList.remove(&#x27;translate-y-10&#x27;, &#x27;opacity-0&#x27;);
+                });
+
+                // Remove after 3 seconds
+                setTimeout(() =&gt; {
+                    toast.classList.add(&#x27;translate-y-10&#x27;, &#x27;opacity-0&#x27;);
+                    setTimeout(() =&gt; {
+                        toast.remove();
+                    }, 300); // Wait for transition
+                }, 3000);
+            }
+
+            // Category Filtering/Scrolling Logic
+            const categoryBtns = document.querySelectorAll(&#x27;.category-btn&#x27;);
+            categoryBtns.forEach(btn =&gt; {
+                btn.addEventListener(&#x27;click&#x27;, () =&gt; {
+                    // Update active state
+                    categoryBtns.forEach(b =&gt; {
+                        b.classList.remove(&#x27;bg-primary&#x27;, &#x27;text-on-primary&#x27;);
+                        b.classList.add(&#x27;bg-surface-container&#x27;, &#x27;text-on-surface&#x27;);
+                    });
+                    btn.classList.remove(&#x27;bg-surface-container&#x27;, &#x27;text-on-surface&#x27;);
+                    btn.classList.add(&#x27;bg-primary&#x27;, &#x27;text-on-primary&#x27;);
+
+                    const targetId = btn.getAttribute(&#x27;data-target&#x27;);
+                    if (targetId) {
+                        const targetElement = document.getElementById(targetId);
+                        if (targetElement) {
+                            const yOffset = -120; // Account for sticky header
+                            const y = targetElement.getBoundingClientRect().top + window.pageYOffset + yOffset;
+                            window.scrollTo({top: y, behavior: &#x27;smooth&#x27;});
+                        }
+                    } else {
+                        // &quot;All Items&quot; clicked
+                        window.scrollTo({top: 0, behavior: &#x27;smooth&#x27;});
+                    }
+                });
+            });
+        });
+    &lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  function alreadyHandled(el) {
+    if (el.hasAttribute(&#x27;onclick&#x27;)) return true;
+    if (el.tagName === &#x27;A&#x27; &amp;&amp; el.getAttribute(&#x27;href&#x27;) &amp;&amp; el.getAttribute(&#x27;href&#x27;) !== &#x27;#&#x27;) return true;
+    if (el.tagName === &#x27;BUTTON&#x27; &amp;&amp; el.type === &#x27;submit&#x27;) return true;
+    return false;
+  }
+  function showPing(el) {
+    var ping = document.createElement(&#x27;div&#x27;);
+    ping.textContent = &#x27;\u2713&#x27;;
+    ping.style.cssText = &#x27;position:absolute;pointer-events:none;font-size:11px;&#x27; +
+      &#x27;color:#00E6A8;font-weight:700;opacity:0;transition:opacity .15s,transform .4s;&#x27; +
+      &#x27;transform:translateY(0);z-index:99999;&#x27;;
+    var rect = el.getBoundingClientRect();
+    ping.style.left = (rect.right - 14 + window.scrollX) + &#x27;px&#x27;;
+    ping.style.top = (rect.top - 6 + window.scrollY) + &#x27;px&#x27;;
+    document.body.appendChild(ping);
+    requestAnimationFrame(function () { ping.style.opacity = &#x27;1&#x27;; });
+    setTimeout(function () {
+      ping.style.opacity = &#x27;0&#x27;;
+      ping.style.transform = &#x27;translateY(-10px)&#x27;;
+    }, 400);
+    setTimeout(function () { ping.remove(); }, 800);
+    el.style.transition = el.style.transition || &#x27;transform .12s&#x27;;
+    var prevTransform = el.style.transform;
+    el.style.transform = &#x27;scale(0.97)&#x27;;
+    setTimeout(function () { el.style.transform = prevTransform || &#x27;&#x27;; }, 120);
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;button, a, [role=&quot;button&quot;], [data-clickable]&#x27;);
+    if (!el || alreadyHandled(el)) return;
+    showPing(el);
+  }, true);
+})();
+&lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  var NAV = {&quot;tokens&quot;: [[&quot;admin&quot;, &quot;dashboard&quot;], [&quot;discover&quot;, &quot;restaurants&quot;], [&quot;bistro&quot;, &quot;luxe&quot;, &quot;menu&quot;], [&quot;secure&quot;, &quot;checkout&quot;]], &quot;current&quot;: 2};
+  function norm(s) { return (s || &#x27;&#x27;).toLowerCase().replace(/[^a-z0-9]+/g, &#x27; &#x27;).trim(); }
+  function singular(w) { return (w.length &gt; 3 &amp;&amp; w.charAt(w.length - 1) === &#x27;s&#x27;) ? w.slice(0, -1) : w; }
+  function matchScreen(text) {
+    var words = norm(text).split(&#x27; &#x27;).filter(Boolean).map(singular);
+    if (!words.length) return -1;
+    var wordSet = {};
+    words.forEach(function (w) { wordSet[w] = true; });
+    for (var i = 0; i &lt; NAV.tokens.length; i++) {
+      var toks = NAV.tokens[i];
+      for (var j = 0; j &lt; toks.length; j++) {
+        if (wordSet[singular(toks[j])]) return i;
+      }
+    }
+    return -1;
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;a, button, [role=&quot;button&quot;], [data-clickable], li, [class*=&quot;card&quot;], [class*=&quot;nav&quot;] a, [class*=&quot;menu&quot;] a&#x27;);
+    if (!el) return;
+    var text = (el.innerText || el.textContent || &#x27;&#x27;).trim();
+    if (!text || text.length &gt; 60) return;  // a long blob isn&#x27;t a nav label
+    var idx = matchScreen(text);
+    if (idx &lt; 0 || idx === NAV.current) return;  // no match, or already here
+    if (window.parent &amp;&amp; window.parent.ppShowScreen) {
+      e.preventDefault();
+      e.stopImmediatePropagation();  // beat the &quot;#&quot; link and the safety-net ping
+      window.parent.ppShowScreen(idx);
+    }
+  }, true);
+})();
+&lt;/script&gt;
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div class="pp-screen" id="pp-screen-3" style="display:none"><iframe class="pp-frame" srcdoc="&lt;!DOCTYPE html&gt;
+
+&lt;html class=&quot;light&quot; lang=&quot;en&quot;&gt;&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;/&gt;
+&lt;meta content=&quot;width=device-width, initial-scale=1.0&quot; name=&quot;viewport&quot;/&gt;
+&lt;title&gt;DineFlow - Checkout&lt;/title&gt;
+&lt;script src=&quot;https://cdn.tailwindcss.com?plugins=forms,container-queries&quot;&gt;&lt;/script&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;amp;family=Inter:wght@400;500;600&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;link href=&quot;https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;amp;display=swap&quot; rel=&quot;stylesheet&quot;/&gt;
+&lt;script id=&quot;tailwind-config&quot;&gt;
+        tailwind.config = {
+          darkMode: &quot;class&quot;,
+          theme: {
+            extend: {
+              &quot;colors&quot;: {
+                &quot;primary-container&quot;: &quot;#ff7043&quot;,
+                &quot;primary&quot;: &quot;#ac3509&quot;,
+                &quot;on-primary-container&quot;: &quot;#641800&quot;,
+                &quot;surface-container-highest&quot;: &quot;#e3e1ec&quot;,
+                &quot;on-secondary-fixed&quot;: &quot;#1c1b1b&quot;,
+                &quot;primary-fixed-dim&quot;: &quot;#ffb59f&quot;,
+                &quot;surface-bright&quot;: &quot;#fbf8ff&quot;,
+                &quot;on-secondary&quot;: &quot;#ffffff&quot;,
+                &quot;secondary-fixed&quot;: &quot;#e5e2e1&quot;,
+                &quot;tertiary-container&quot;: &quot;#9d9c98&quot;,
+                &quot;on-secondary-fixed-variant&quot;: &quot;#474746&quot;,
+                &quot;outline&quot;: &quot;#8d7169&quot;,
+                &quot;on-primary-fixed&quot;: &quot;#3a0a00&quot;,
+                &quot;on-primary&quot;: &quot;#ffffff&quot;,
+                &quot;secondary-fixed-dim&quot;: &quot;#c8c6c5&quot;,
+                &quot;error&quot;: &quot;#ba1a1a&quot;,
+                &quot;on-primary-fixed-variant&quot;: &quot;#852300&quot;,
+                &quot;on-surface-variant&quot;: &quot;#59413a&quot;,
+                &quot;outline-variant&quot;: &quot;#e0bfb6&quot;,
+                &quot;surface-container&quot;: &quot;#eeedf7&quot;,
+                &quot;on-background&quot;: &quot;#1a1b22&quot;,
+                &quot;tertiary&quot;: &quot;#5e5e5b&quot;,
+                &quot;on-tertiary-fixed&quot;: &quot;#1b1c19&quot;,
+                &quot;inverse-primary&quot;: &quot;#ffb59f&quot;,
+                &quot;surface-tint&quot;: &quot;#ac3509&quot;,
+                &quot;on-tertiary-fixed-variant&quot;: &quot;#474744&quot;,
+                &quot;inverse-surface&quot;: &quot;#2f3038&quot;,
+                &quot;on-error&quot;: &quot;#ffffff&quot;,
+                &quot;inverse-on-surface&quot;: &quot;#f1effa&quot;,
+                &quot;secondary&quot;: &quot;#5f5e5e&quot;,
+                &quot;secondary-container&quot;: &quot;#e2dfde&quot;,
+                &quot;surface-container-high&quot;: &quot;#e8e7f1&quot;,
+                &quot;on-secondary-container&quot;: &quot;#636262&quot;,
+                &quot;on-surface&quot;: &quot;#1a1b22&quot;,
+                &quot;tertiary-fixed&quot;: &quot;#e4e2dd&quot;,
+                &quot;surface-container-low&quot;: &quot;#f4f2fd&quot;,
+                &quot;primary-fixed&quot;: &quot;#ffdbd0&quot;,
+                &quot;on-tertiary-container&quot;: &quot;#333431&quot;,
+                &quot;error-container&quot;: &quot;#ffdad6&quot;,
+                &quot;surface-dim&quot;: &quot;#dad9e3&quot;,
+                &quot;surface&quot;: &quot;#fbf8ff&quot;,
+                &quot;background&quot;: &quot;#fbf8ff&quot;,
+                &quot;on-tertiary&quot;: &quot;#ffffff&quot;,
+                &quot;surface-container-lowest&quot;: &quot;#ffffff&quot;,
+                &quot;on-error-container&quot;: &quot;#93000a&quot;,
+                &quot;tertiary-fixed-dim&quot;: &quot;#c8c6c2&quot;,
+                &quot;surface-variant&quot;: &quot;#e3e1ec&quot;
+              },
+              &quot;borderRadius&quot;: {
+                &quot;DEFAULT&quot;: &quot;0.25rem&quot;,
+                &quot;lg&quot;: &quot;0.5rem&quot;,
+                &quot;xl&quot;: &quot;0.75rem&quot;,
+                &quot;full&quot;: &quot;9999px&quot;
+              },
+              &quot;spacing&quot;: {
+                &quot;margin-mobile&quot;: &quot;16px&quot;,
+                &quot;md&quot;: &quot;24px&quot;,
+                &quot;sm&quot;: &quot;12px&quot;,
+                &quot;lg&quot;: &quot;48px&quot;,
+                &quot;base&quot;: &quot;8px&quot;,
+                &quot;xs&quot;: &quot;4px&quot;,
+                &quot;gutter&quot;: &quot;24px&quot;,
+                &quot;xl&quot;: &quot;80px&quot;,
+                &quot;margin-desktop&quot;: &quot;64px&quot;
+              },
+              &quot;fontFamily&quot;: {
+                &quot;body-lg&quot;: [&quot;Inter&quot;],
+                &quot;headline-sm&quot;: [&quot;Geist&quot;],
+                &quot;caption&quot;: [&quot;Inter&quot;],
+                &quot;display-lg&quot;: [&quot;Geist&quot;],
+                &quot;display-lg-mobile&quot;: [&quot;Geist&quot;],
+                &quot;headline-md&quot;: [&quot;Geist&quot;],
+                &quot;label-md&quot;: [&quot;Geist&quot;],
+                &quot;body-md&quot;: [&quot;Inter&quot;]
+              },
+              &quot;fontSize&quot;: {
+                &quot;body-lg&quot;: [&quot;18px&quot;, {&quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}],
+                &quot;headline-sm&quot;: [&quot;20px&quot;, {&quot;lineHeight&quot;: &quot;28px&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;caption&quot;: [&quot;12px&quot;, {&quot;lineHeight&quot;: &quot;16px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}],
+                &quot;display-lg&quot;: [&quot;48px&quot;, {&quot;lineHeight&quot;: &quot;56px&quot;, &quot;letterSpacing&quot;: &quot;-0.02em&quot;, &quot;fontWeight&quot;: &quot;700&quot;}],
+                &quot;display-lg-mobile&quot;: [&quot;32px&quot;, {&quot;lineHeight&quot;: &quot;40px&quot;, &quot;letterSpacing&quot;: &quot;-0.01em&quot;, &quot;fontWeight&quot;: &quot;700&quot;}],
+                &quot;headline-md&quot;: [&quot;24px&quot;, {&quot;lineHeight&quot;: &quot;32px&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;label-md&quot;: [&quot;14px&quot;, {&quot;lineHeight&quot;: &quot;20px&quot;, &quot;letterSpacing&quot;: &quot;0.05em&quot;, &quot;fontWeight&quot;: &quot;600&quot;}],
+                &quot;body-md&quot;: [&quot;16px&quot;, {&quot;lineHeight&quot;: &quot;24px&quot;, &quot;fontWeight&quot;: &quot;400&quot;}]
+              }
+            },
+          },
+        }
+    &lt;/script&gt;
+&lt;style&gt;
+        .glass-card {
+            background-color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0px 12px 32px rgba(255, 112, 67, 0.08);
+        }
+        .input-ring:focus-within {
+            ring-width: 2px;
+            ring-color: #ac3509;
+            outline: none;
+        }
+        .loader {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 3px solid #fff;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body class=&quot;bg-surface text-on-surface min-h-screen font-body-md antialiased overflow-x-hidden relative&quot;&gt;
+&lt;!-- TopNavBar (Transactional - Modified to show only Brand and Back action, no nav links) --&gt;
+&lt;header class=&quot;fixed top-0 w-full z-50 flex justify-between items-center px-margin-mobile md:px-margin-desktop h-20 bg-surface/90 backdrop-blur-xl border-b border-white/20 shadow-sm shadow-primary/5&quot;&gt;
+&lt;div class=&quot;flex items-center gap-md&quot;&gt;
+&lt;button aria-label=&quot;Go back&quot; class=&quot;flex items-center justify-center p-2 rounded-full hover:bg-surface-variant transition-colors group&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors&quot;&gt;arrow_back&lt;/span&gt;
+&lt;/button&gt;
+&lt;div class=&quot;font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg text-primary tracking-tight&quot;&gt;DineFlow&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;font-headline-sm text-headline-sm text-on-surface-variant hidden md:block&quot;&gt;
+            Secure Checkout
+        &lt;/div&gt;
+&lt;div class=&quot;flex items-center gap-sm text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;lock&lt;/span&gt;
+&lt;span class=&quot;font-label-md text-label-md hidden sm:inline&quot;&gt;Encrypted&lt;/span&gt;
+&lt;/div&gt;
+&lt;/header&gt;
+&lt;main class=&quot;pt-[100px] pb-xl px-margin-mobile md:px-margin-desktop max-w-[1440px] mx-auto relative z-10&quot;&gt;
+&lt;div class=&quot;flex flex-col lg:flex-row gap-lg&quot; id=&quot;checkout-content&quot;&gt;
+&lt;!-- Left Column: Checkout Steps --&gt;
+&lt;div class=&quot;flex-1 flex flex-col gap-md&quot;&gt;
+&lt;h1 class=&quot;font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg mb-sm&quot;&gt;Checkout&lt;/h1&gt;
+&lt;!-- Step 1: Summary --&gt;
+&lt;section class=&quot;glass-card rounded-xl p-md&quot;&gt;
+&lt;div class=&quot;flex items-center gap-sm mb-md pb-sm border-b border-outline-variant&quot;&gt;
+&lt;div class=&quot;w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-headline-sm text-headline-sm&quot;&gt;1&lt;/div&gt;
+&lt;h2 class=&quot;font-headline-md text-headline-md&quot;&gt;Order Summary&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex flex-col gap-sm&quot;&gt;
+&lt;!-- Item 1 --&gt;
+&lt;div class=&quot;flex items-center justify-between&quot;&gt;
+&lt;div class=&quot;flex items-center gap-md&quot;&gt;
+&lt;img class=&quot;w-16 h-16 rounded-lg object-cover shadow-sm&quot; data-alt=&quot;A beautifully plated Truffle Mushroom Risotto in a minimalist white bowl, placed on a high-end textured grey dining table. The lighting is soft and warm, creating a premium culinary aesthetic. The dish is garnished with microgreens and fresh shaved truffle, embodying modern epicurean dining.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuD-QIRTfUGyHVPiEaf_pSNErDvHiybfFPR-wwKggBHDmOHB5lCIwwzZL2hdkN7tS5hIRexalmntNJRwuU_msvSXnWjrxR6E3DRyOrPaZtZWhkTE4dz-DaGY-c_6KHJ4uyPKJWHUxAGgJkYiu6uVWfCUMG-hEEbKD71N5kUbizItjwLBqJam9FrTKl6AwhDe5CzxBiA0hboWLr8AiuvtIgeIBN26vuNhAiJEv-OpjcxoWvfPZdBDS4-uKhXPe1Kq5tXd0Teeg2hB8-pO&quot;/&gt;
+&lt;div&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-surface&quot;&gt;Truffle Mushroom Risotto&lt;/h3&gt;
+&lt;p class=&quot;font-caption text-caption text-on-surface-variant&quot;&gt;Qty: 2 • Wild mushrooms, parmesan&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;font-headline-sm text-headline-sm&quot;&gt;$48.00&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Item 2 --&gt;
+&lt;div class=&quot;flex items-center justify-between mt-sm pt-sm border-t border-surface-variant border-dashed&quot;&gt;
+&lt;div class=&quot;flex items-center gap-md&quot;&gt;
+&lt;img class=&quot;w-16 h-16 rounded-lg object-cover shadow-sm&quot; data-alt=&quot;A perfectly seared A5 Wagyu steak presented on a dark slate board, accompanied by roasted asparagus and a small copper pot of peppercorn sauce. High-key dramatic lighting highlights the rich textures of the meat and sides. The setting is a sophisticated modern restaurant table.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuDAmTU0-uE_B2vV0hZQnDBhJrx3F1JsqQkNw9Z3n6NjgG_6ntJFHoji7zPm3Rg2bUyruTXznov2ZvcwEjnom5SqW30oY29-HFVuLFxN3nDewdV4Xv5RvTdcIjp4ofYUMHuO48oJqqwqxsB6keuy3ibxkxa9waVXx539qhnJ4_8Ib0AiyqYP8RRa0bOLp5IIYAi4TIAKj2jKnNqW9s81yDZWOScuRfgAaKmsqC0d2zU6w7PY7yeDNJBUradY2meeH8Wli0ucSnGhkat1&quot;/&gt;
+&lt;div&gt;
+&lt;h3 class=&quot;font-headline-sm text-headline-sm text-on-surface&quot;&gt;A5 Wagyu Ribeye&lt;/h3&gt;
+&lt;p class=&quot;font-caption text-caption text-on-surface-variant&quot;&gt;Qty: 1 • Medium Rare, Peppercorn sauce&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;font-headline-sm text-headline-sm&quot;&gt;$85.00&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;!-- Step 2: Delivery --&gt;
+&lt;section class=&quot;glass-card rounded-xl p-md&quot;&gt;
+&lt;div class=&quot;flex items-center justify-between mb-md pb-sm border-b border-outline-variant&quot;&gt;
+&lt;div class=&quot;flex items-center gap-sm&quot;&gt;
+&lt;div class=&quot;w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-headline-sm text-headline-sm&quot;&gt;2&lt;/div&gt;
+&lt;h2 class=&quot;font-headline-md text-headline-md text-on-surface-variant&quot;&gt;Delivery Details&lt;/h2&gt;
+&lt;/div&gt;
+&lt;button class=&quot;text-primary font-label-md text-label-md hover:underline&quot;&gt;Edit&lt;/button&gt;
+&lt;/div&gt;
+&lt;div class=&quot;grid grid-cols-1 md:grid-cols-2 gap-md opacity-70 hover:opacity-100 transition-opacity&quot;&gt;
+&lt;div&gt;
+&lt;p class=&quot;font-label-md text-label-md text-on-surface-variant mb-xs&quot;&gt;Delivery Address&lt;/p&gt;
+&lt;p class=&quot;font-body-md text-body-md&quot;&gt;123 Culinary Ave, Apt 4B&lt;br/&gt;San Francisco, CA 94105&lt;/p&gt;
+&lt;/div&gt;
+&lt;div&gt;
+&lt;p class=&quot;font-label-md text-label-md text-on-surface-variant mb-xs&quot;&gt;Delivery Time&lt;/p&gt;
+&lt;div class=&quot;flex items-center gap-sm text-primary&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined&quot;&gt;schedule&lt;/span&gt;
+&lt;span class=&quot;font-body-md text-body-md&quot;&gt;ASAP (30-45 mins)&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;!-- Step 3: Payment --&gt;
+&lt;section class=&quot;glass-card rounded-xl p-md border-primary/30&quot;&gt;
+&lt;div class=&quot;flex items-center gap-sm mb-md pb-sm border-b border-outline-variant&quot;&gt;
+&lt;div class=&quot;w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-headline-sm text-headline-sm&quot;&gt;3&lt;/div&gt;
+&lt;h2 class=&quot;font-headline-md text-headline-md&quot;&gt;Payment Method&lt;/h2&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex flex-col gap-md&quot;&gt;
+&lt;!-- Mock Stripe Input --&gt;
+&lt;div class=&quot;bg-surface-container-lowest rounded-xl p-md border border-outline-variant focus-within:ring-2 focus-within:ring-primary focus-within:border-transparent transition-all shadow-sm&quot;&gt;
+&lt;label class=&quot;block font-label-md text-label-md text-on-surface-variant mb-sm&quot;&gt;Card Information&lt;/label&gt;
+&lt;div class=&quot;flex items-center gap-sm mb-sm border-b border-surface-variant pb-sm&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-outline&quot;&gt;credit_card&lt;/span&gt;
+&lt;input class=&quot;w-full bg-transparent outline-none font-body-md text-body-md text-on-surface placeholder:text-outline-variant&quot; placeholder=&quot;Card number&quot; type=&quot;text&quot;/&gt;
+&lt;div class=&quot;flex gap-1&quot;&gt;
+&lt;img class=&quot;h-6 w-auto opacity-50&quot; data-alt=&quot;A small minimalist icon representing a Visa credit card logo, styled flat and subtle to fit a clean checkout interface. Light background.&quot; src=&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuC61VjG2O5TIAGFwi33jv6NDgt1miwlV-pGdjV0ok6bTJq2NRFJcCfTXzq4d98LFET07qtOyVSPi1YKB7bu2xBDnC-WYVfK5g1DkSE8UDmZoKmCZzo_JLCYsxw_3U0fEbHSvQr4ls1lJSwRcYUo-2hw6gHApX-fLC-lMkeUEVLrhVtflCxrCAa3Q0ghFvy_pcYbqvxHDWORft1Gcmfqpr_W0JNURRcV_c6grSk4Ibm54WBCEljDGaf8aqqRMBpFIBOFTRkxSKQ5YXQj&quot;/&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;grid grid-cols-2 gap-sm&quot;&gt;
+&lt;div class=&quot;flex items-center gap-sm border-r border-surface-variant pr-sm&quot;&gt;
+&lt;input class=&quot;w-full bg-transparent outline-none font-body-md text-body-md text-on-surface placeholder:text-outline-variant&quot; placeholder=&quot;MM / YY&quot; type=&quot;text&quot;/&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex items-center gap-sm pl-sm&quot;&gt;
+&lt;input class=&quot;w-full bg-transparent outline-none font-body-md text-body-md text-on-surface placeholder:text-outline-variant&quot; placeholder=&quot;CVC&quot; type=&quot;text&quot;/&gt;
+&lt;span class=&quot;material-symbols-outlined text-outline text-sm&quot; title=&quot;3 digits on back of card&quot;&gt;info&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;bg-surface-container-lowest rounded-xl p-sm border border-outline-variant focus-within:ring-2 focus-within:ring-primary focus-within:border-transparent transition-all shadow-sm&quot;&gt;
+&lt;input class=&quot;w-full bg-transparent outline-none font-body-md text-body-md text-on-surface placeholder:text-outline-variant px-sm py-xs&quot; placeholder=&quot;Name on card&quot; type=&quot;text&quot;/&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;/div&gt;
+&lt;!-- Right Column: Total &amp; Action --&gt;
+&lt;div class=&quot;w-full lg:w-[400px]&quot;&gt;
+&lt;div class=&quot;glass-card rounded-xl p-md sticky top-[100px]&quot;&gt;
+&lt;h3 class=&quot;font-headline-md text-headline-md mb-md border-b border-outline-variant pb-sm&quot;&gt;Order Total&lt;/h3&gt;
+&lt;div class=&quot;flex flex-col gap-sm mb-md font-body-md text-body-md&quot;&gt;
+&lt;div class=&quot;flex justify-between text-on-surface-variant&quot;&gt;
+&lt;span&gt;Subtotal&lt;/span&gt;
+&lt;span&gt;$133.00&lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex justify-between text-on-surface-variant&quot;&gt;
+&lt;span&gt;Taxes &amp;amp; Fees&lt;/span&gt;
+&lt;span&gt;$14.65&lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex justify-between text-on-surface-variant&quot;&gt;
+&lt;span&gt;Delivery&lt;/span&gt;
+&lt;span&gt;$5.99&lt;/span&gt;
+&lt;/div&gt;
+&lt;div class=&quot;flex justify-between font-headline-sm text-headline-sm pt-sm border-t border-outline-variant mt-sm text-on-surface&quot;&gt;
+&lt;span&gt;Total&lt;/span&gt;
+&lt;span&gt;$153.64&lt;/span&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;button class=&quot;w-full bg-[#ac3509] hover:bg-[#852300] text-white rounded-[16px] py-md font-headline-sm text-headline-sm flex justify-center items-center gap-sm transition-all shadow-md shadow-primary/20 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/30&quot; id=&quot;place-order-btn&quot;&gt;
+&lt;span id=&quot;btn-text&quot;&gt;Place Order - $153.64&lt;/span&gt;
+&lt;div class=&quot;loader hidden&quot; id=&quot;btn-loader&quot;&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;p class=&quot;font-caption text-caption text-center text-on-surface-variant mt-sm&quot;&gt;
+                        By placing this order, you agree to our Terms of Service and Privacy Policy.
+                    &lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- Success Overlay (Hidden by default) --&gt;
+&lt;div class=&quot;hidden absolute inset-0 z-50 flex items-center justify-center bg-surface/95 backdrop-blur-md min-h-[calc(100vh-80px)]&quot; id=&quot;success-overlay&quot;&gt;
+&lt;div class=&quot;glass-card rounded-xl p-xl flex flex-col items-center justify-center text-center max-w-md w-full transform scale-95 opacity-0 transition-all duration-500&quot; id=&quot;success-card&quot;&gt;
+&lt;div class=&quot;w-24 h-24 rounded-full bg-primary-container/20 flex items-center justify-center mb-md&quot;&gt;
+&lt;span class=&quot;material-symbols-outlined text-[48px] text-primary&quot; style=&quot;font-variation-settings: &#x27;FILL&#x27; 1;&quot;&gt;check_circle&lt;/span&gt;
+&lt;/div&gt;
+&lt;h2 class=&quot;font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg text-on-surface mb-sm&quot;&gt;Order Confirmed!&lt;/h2&gt;
+&lt;p class=&quot;font-body-lg text-body-lg text-on-surface-variant mb-lg&quot;&gt;Your gourmet experience is being prepared. We&#x27;ll notify you when it&#x27;s on the way.&lt;/p&gt;
+&lt;div class=&quot;bg-surface-container-low w-full rounded-xl p-md mb-lg&quot;&gt;
+&lt;p class=&quot;font-label-md text-label-md text-on-surface-variant mb-xs&quot;&gt;Order Number&lt;/p&gt;
+&lt;p class=&quot;font-headline-sm text-headline-sm text-primary&quot;&gt;#DF-89420&lt;/p&gt;
+&lt;/div&gt;
+&lt;button class=&quot;w-full bg-transparent border-2 border-primary text-primary rounded-[16px] py-sm font-headline-sm text-headline-sm hover:bg-primary/5 transition-colors&quot;&gt;
+                    Track Order
+                &lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/main&gt;
+&lt;!-- Footer (Simplified for Transactional context) --&gt;
+&lt;footer class=&quot;w-full py-md px-margin-mobile md:px-margin-desktop flex flex-col md:flex-row justify-between items-center gap-md bg-surface border-t border-outline-variant font-caption text-caption text-on-surface-variant mt-auto relative z-10&quot;&gt;
+&lt;div&gt;© 2024 DineFlow AI Logistics. Secure Checkout.&lt;/div&gt;
+&lt;div class=&quot;flex gap-md&quot;&gt;
+&lt;a class=&quot;hover:text-primary transition-colors&quot; href=&quot;#&quot;&gt;Support&lt;/a&gt;
+&lt;a class=&quot;hover:text-primary transition-colors&quot; href=&quot;#&quot;&gt;Privacy&lt;/a&gt;
+&lt;/div&gt;
+&lt;/footer&gt;
+&lt;script&gt;
+        document.addEventListener(&#x27;DOMContentLoaded&#x27;, () =&gt; {
+            const placeOrderBtn = document.getElementById(&#x27;place-order-btn&#x27;);
+            const btnText = document.getElementById(&#x27;btn-text&#x27;);
+            const btnLoader = document.getElementById(&#x27;btn-loader&#x27;);
+            const checkoutContent = document.getElementById(&#x27;checkout-content&#x27;);
+            const successOverlay = document.getElementById(&#x27;success-overlay&#x27;);
+            const successCard = document.getElementById(&#x27;success-card&#x27;);
+
+            placeOrderBtn.addEventListener(&#x27;click&#x27;, () =&gt; {
+                // UI State: Loading
+                placeOrderBtn.disabled = true;
+                btnText.classList.add(&#x27;hidden&#x27;);
+                btnLoader.classList.remove(&#x27;hidden&#x27;);
+                
+                // Simulate network request
+                setTimeout(() =&gt; {
+                    // Hide checkout content
+                    checkoutContent.classList.add(&#x27;hidden&#x27;);
+                    
+                    // Show success overlay
+                    successOverlay.classList.remove(&#x27;hidden&#x27;);
+                    
+                    // Trigger animation frame for CSS transition
+                    requestAnimationFrame(() =&gt; {
+                        successCard.classList.remove(&#x27;scale-95&#x27;, &#x27;opacity-0&#x27;);
+                        successCard.classList.add(&#x27;scale-100&#x27;, &#x27;opacity-100&#x27;);
+                    });
+                    
+                }, 2000);
+            });
+        });
+    &lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  function alreadyHandled(el) {
+    if (el.hasAttribute(&#x27;onclick&#x27;)) return true;
+    if (el.tagName === &#x27;A&#x27; &amp;&amp; el.getAttribute(&#x27;href&#x27;) &amp;&amp; el.getAttribute(&#x27;href&#x27;) !== &#x27;#&#x27;) return true;
+    if (el.tagName === &#x27;BUTTON&#x27; &amp;&amp; el.type === &#x27;submit&#x27;) return true;
+    return false;
+  }
+  function showPing(el) {
+    var ping = document.createElement(&#x27;div&#x27;);
+    ping.textContent = &#x27;\u2713&#x27;;
+    ping.style.cssText = &#x27;position:absolute;pointer-events:none;font-size:11px;&#x27; +
+      &#x27;color:#00E6A8;font-weight:700;opacity:0;transition:opacity .15s,transform .4s;&#x27; +
+      &#x27;transform:translateY(0);z-index:99999;&#x27;;
+    var rect = el.getBoundingClientRect();
+    ping.style.left = (rect.right - 14 + window.scrollX) + &#x27;px&#x27;;
+    ping.style.top = (rect.top - 6 + window.scrollY) + &#x27;px&#x27;;
+    document.body.appendChild(ping);
+    requestAnimationFrame(function () { ping.style.opacity = &#x27;1&#x27;; });
+    setTimeout(function () {
+      ping.style.opacity = &#x27;0&#x27;;
+      ping.style.transform = &#x27;translateY(-10px)&#x27;;
+    }, 400);
+    setTimeout(function () { ping.remove(); }, 800);
+    el.style.transition = el.style.transition || &#x27;transform .12s&#x27;;
+    var prevTransform = el.style.transform;
+    el.style.transform = &#x27;scale(0.97)&#x27;;
+    setTimeout(function () { el.style.transform = prevTransform || &#x27;&#x27;; }, 120);
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;button, a, [role=&quot;button&quot;], [data-clickable]&#x27;);
+    if (!el || alreadyHandled(el)) return;
+    showPing(el);
+  }, true);
+})();
+&lt;/script&gt;
+
+&lt;script&gt;
+(function () {
+  var NAV = {&quot;tokens&quot;: [[&quot;admin&quot;, &quot;dashboard&quot;], [&quot;discover&quot;, &quot;restaurants&quot;], [&quot;bistro&quot;, &quot;luxe&quot;, &quot;menu&quot;], [&quot;secure&quot;, &quot;checkout&quot;]], &quot;current&quot;: 3};
+  function norm(s) { return (s || &#x27;&#x27;).toLowerCase().replace(/[^a-z0-9]+/g, &#x27; &#x27;).trim(); }
+  function singular(w) { return (w.length &gt; 3 &amp;&amp; w.charAt(w.length - 1) === &#x27;s&#x27;) ? w.slice(0, -1) : w; }
+  function matchScreen(text) {
+    var words = norm(text).split(&#x27; &#x27;).filter(Boolean).map(singular);
+    if (!words.length) return -1;
+    var wordSet = {};
+    words.forEach(function (w) { wordSet[w] = true; });
+    for (var i = 0; i &lt; NAV.tokens.length; i++) {
+      var toks = NAV.tokens[i];
+      for (var j = 0; j &lt; toks.length; j++) {
+        if (wordSet[singular(toks[j])]) return i;
+      }
+    }
+    return -1;
+  }
+  document.addEventListener(&#x27;click&#x27;, function (e) {
+    var el = e.target.closest(&#x27;a, button, [role=&quot;button&quot;], [data-clickable], li, [class*=&quot;card&quot;], [class*=&quot;nav&quot;] a, [class*=&quot;menu&quot;] a&#x27;);
+    if (!el) return;
+    var text = (el.innerText || el.textContent || &#x27;&#x27;).trim();
+    if (!text || text.length &gt; 60) return;  // a long blob isn&#x27;t a nav label
+    var idx = matchScreen(text);
+    if (idx &lt; 0 || idx === NAV.current) return;  // no match, or already here
+    if (window.parent &amp;&amp; window.parent.ppShowScreen) {
+      e.preventDefault();
+      e.stopImmediatePropagation();  // beat the &quot;#&quot; link and the safety-net ping
+      window.parent.ppShowScreen(idx);
+    }
+  }, true);
+})();
+&lt;/script&gt;
+&lt;/body&gt;&lt;/html&gt;"></iframe></div>
+<div class="pp-switcher" id="pp-switcher" onclick="this.classList.toggle('pp-open')">
+  <div class="pp-switcher-list"><button class="pp-tab-btn" onclick="ppShowScreen(0)" id="pp-tab-btn-0">DineFlow | Admin Dashboard</button>
+<button class="pp-tab-btn" onclick="ppShowScreen(1)" id="pp-tab-btn-1">DineFlow | Discover Restaurants</button>
+<button class="pp-tab-btn" onclick="ppShowScreen(2)" id="pp-tab-btn-2">DineFlow | Bistro Luxe Menu</button>
+<button class="pp-tab-btn" onclick="ppShowScreen(3)" id="pp-tab-btn-3">DineFlow | Secure Checkout</button></div>
+  <button class="pp-switcher-toggle">&#9636; Screens</button>
+</div>
+<script>
+function ppShowScreen(idx) {
+  document.querySelectorAll('.pp-screen').forEach(function(el, i) {
+    el.style.display = (i === idx) ? 'block' : 'none';
+  });
+  document.querySelectorAll('.pp-tab-btn').forEach(function(el, i) {
+    el.classList.toggle('active', i === idx);
+  });
+  document.getElementById('pp-switcher').classList.remove('pp-open');
+}
+ppShowScreen(0);
+</script>
+</body>
+</html>

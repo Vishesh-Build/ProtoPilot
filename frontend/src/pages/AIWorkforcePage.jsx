@@ -7,12 +7,12 @@ import {
 import bgImage from "./assets/hero-bg.jpg";
 
 /* ============================================================
-   ProtoPilot — AI Workforce
+   ProtoPilot â€” AI Workforce
 
    Structure (rail + detail panel) is unchanged. What's real now:
    status/progress/output text come from `liveAgents`/`liveOutputs`
    (lifted up from GenerationPipelinePage's real WebSocket to
-   /ws/meeting/{id}/generate — see App.jsx). No generation has run
+   /ws/meeting/{id}/generate â€” see App.jsx). No generation has run
    yet = every agent shown idle, matching an honest empty state.
    ============================================================ */
 
@@ -231,7 +231,7 @@ const NAV_TABS = [
   { label: "Prototype Viewer", icon: Eye },
 ];
 
-export default function AIWorkforcePage({ liveAgents = {}, liveOutputs = {}, onNavigate }) {
+export default function AIWorkforcePage({ liveAgents = {}, liveOutputs = {}, liveLogs = {}, onNavigate }) {
   const [selectedId, setSelectedId] = useState("architect");
 
   const merged = AGENT_TEMPLATE.map((t) => ({
@@ -239,6 +239,7 @@ export default function AIWorkforcePage({ liveAgents = {}, liveOutputs = {}, onN
     status: liveAgents[t.id]?.status || "idle",
     progress: liveAgents[t.id]?.progress ?? 0,
     output: liveOutputs[t.id],
+    realLogs: liveLogs[t.id] || [],
   }));
   const agentLookup = Object.fromEntries(merged.map((a) => [a.id, a]));
   const agent = agentLookup[selectedId] || merged[0];
@@ -347,20 +348,28 @@ export default function AIWorkforcePage({ liveAgents = {}, liveOutputs = {}, onN
           <div className="wf-panel">
             <div className="wf-panel-title"><Terminal size={12} /> Output</div>
             <div className="wf-log-box wf-mono">
-              {agent.status === "idle" && (
-                <div className="wf-log-line" style={{ color: "#5B5F70" }}>Waiting for dependencies to complete before starting…</div>
-              )}
-              {(agent.status === "working" || agent.status === "thinking") && (
-                <div className="wf-log-line" style={{ color: "#6FE6C4" }}>{agent.status === "thinking" ? "Reading input from dependencies…" : "Generating output…"}</div>
-              )}
-              {agent.status === "failed" && (
-                <div className="wf-log-line" style={{ color: "#FF6B6B" }}>Failed — check the backend server logs for details.</div>
-              )}
-              {agent.status === "completed" && agent.id === "prototype" && (
-                <div className="wf-log-line" style={{ color: "#6FE6C4" }}>Generated a real HTML prototype — open Prototype Viewer to see it.</div>
-              )}
-              {agent.status === "completed" && agent.id !== "prototype" && (
-                <div className="wf-log-line">{agent.output || "Completed — no output text recorded."}</div>
+              {agent.realLogs.length > 0 ? (
+                agent.realLogs.map((line, i) => (
+                  <div key={i} className="wf-log-line">{line}</div>
+                ))
+              ) : (
+                <>
+                  {agent.status === "idle" && (
+                    <div className="wf-log-line" style={{ color: "#5B5F70" }}>Waiting for dependencies to complete before starting...</div>
+                  )}
+                  {(agent.status === "working" || agent.status === "thinking") && (
+                    <div className="wf-log-line" style={{ color: "#6FE6C4" }}>{agent.status === "thinking" ? "Reading input from dependencies..." : "Generating output..."}</div>
+                  )}
+                  {agent.status === "failed" && (
+                    <div className="wf-log-line" style={{ color: "#FF6B6B" }}>Failed â€” check the backend server logs for details.</div>
+                  )}
+                  {agent.status === "completed" && agent.id === "prototype" && (
+                    <div className="wf-log-line" style={{ color: "#6FE6C4" }}>Generated a real HTML prototype â€” open Prototype Viewer to see it.</div>
+                  )}
+                  {agent.status === "completed" && agent.id !== "prototype" && (
+                    <div className="wf-log-line">{agent.output || "Completed â€” no output text recorded."}</div>
+                  )}
+                </>
               )}
             </div>
           </div>

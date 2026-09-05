@@ -58,8 +58,24 @@ export default function App() {
   const [activeMeetingId, setActiveMeetingId] = useState(null);
   const [isMeetingHost, setIsMeetingHost] = useState(true);
 
+  // True while a live call should stay connected in the background. The app
+  // renders one page at a time, so without this, navigating from the meeting
+  // to the Workforce/Pipeline/Prototype pages unmounts LiveMeetingCall and
+  // drops the LiveKit room (and restarts the transcription bot) — the "call
+  // drops when I open the pipeline" bug. We keep it mounted (just hidden)
+  // while a meeting is live, and only tear it down on an explicit Back / Hang
+  // up or when navigating out to a non-meeting page.
+  const [meetingLive, setMeetingLive] = useState(false);
+
+  // Why the pipeline was opened: "run" (host pressed Generate/Regenerate —
+  // actually build) vs "view" (just navigated in to look — replay the built
+  // one, never start a paid run). Defaults to "view" so no navigation can
+  // accidentally kick off generation; only the explicit button sets "run".
+  const [pipelineIntent, setPipelineIntent] = useState("view");
+
   const [liveAgents, setLiveAgents] = useState({});
   const [liveOutputs, setLiveOutputs] = useState({});
+  const [liveLogs, setLiveLogs] = useState({});
 
   useEffect(() => {
     if (initialToken) return;
@@ -94,12 +110,14 @@ export default function App() {
     await authApi.logout().catch(() => {});
     setCurrentUser(null);
     setActiveMeetingId(null);
+    setMeetingLive(false);
     setPage("home");
   };
 
-  const handleGenerationUpdate = useCallback((agents, outputs) => {
+  const handleGenerationUpdate = useCallback((agents, outputs, logs) => {
     setLiveAgents(agents || {});
     if (outputs) setLiveOutputs(outputs);
+    if (logs) setLiveLogs(logs);
   }, []);
 
   const startNewMeeting = () => {
@@ -107,6 +125,8 @@ export default function App() {
     setIsMeetingHost(true);
     setLiveAgents({});
     setLiveOutputs({});
+    setLiveLogs({});
+    setMeetingLive(true);
     setPage("live");
   };
 
@@ -119,6 +139,7 @@ export default function App() {
     } catch {
       setIsMeetingHost(false);
     }
+    setMeetingLive(true);
     setPage("live");
   };
 
@@ -133,77 +154,127 @@ export default function App() {
     setIsMeetingHost(Boolean(currentUser && session.host_user_id === currentUser.id));
     setLiveAgents({});
     setLiveOutputs({});
+    setLiveLogs({});
+    setMeetingLive(true);
     setPage("live");
   };
 
-  const navigate = (target) => setPage(target);
+  // Pages the host can reach *from* a live meeting without leaving it. While
+  // the meeting is live and the current page is one of these, LiveMeetingCall
+  // stays mounted (hidden behind the page when it isn't "live"). Anything else
+  // — Dashboard, home, login — means the host has left the meeting.
+  const LIVE_OVERLAY_PAGES = ["live", "workforce", "pipeline", "viewer"];
+
+  // Any navigation into the pipeline that isn't the explicit Generate/
+  // Regenerate button is a look, not a run — force "view" so opening the
+  // page just replays the already-built prototype. Navigating anywhere that
+  // isn't a meeting sub-page ends the live call.
+  const navigate = (target) => {
+    if (target === "pipeline") setPipelineIntent("view");
+    if (!LIVE_OVERLAY_PAGES.includes(target)) setMeetingLive(false);
+    setPage(target);
+  };
+
+  // Explicit Back / Hang up from the meeting screen: end the live session so
+  // the room actually disconnects, then return to the dashboard.
+  const endLiveMeeting = () => {
+    setMeetingLive(false);
+    setPage("dashboard");
+  };
 
   if (checkingSession) return null;
 
-  switch (page) {
-    case "login":
-      return (
-        <LoginPage
-          onLogin={handleLoggedIn}
-          onGoRegister={() => setPage("register")}
-          onForgotPassword={() => setPage("forgot")}
-        />
-      );
+  const liveCallProps = {
+    meetingId: activeMeetingId,
+    currentUser,
+    isHost: isMeetingHost,
+    onBack: endLiveMeeting,
+    onHangUp: endLiveMeeting,
+    onGeneratePrototype: () => { setPipelineIntent("run"); setPage("pipeline"); },
+    onViewPrototype: () => setPage("viewer"),
+    onOpenWorkforce: () => navigate("workforce"),
+    onOpenPipeline: () => navigate("pipeline"),
+  };
 
-    case "register":
-      return <RegisterPage onRegister={handleLoggedIn} onGoLogin={() => setPage("login")} />;
+  // The persistent live call. Rendered once and kept mounted across every
+  // meeting sub-page so the LiveKit room, the mic, and the caption feed
+  // survive navigation. Shown only on the "live" page (display:contents keeps
+  // its own full-screen layout intact); hidden — but still connected — while
+  // the host is on Workforce/Pipeline/Prototype.
+  const persistentLiveCall =
+    meetingLive && activeMeetingId ? (
+      <div style={{ display: page === "live" ? "contents" : "none" }}>
+        <LiveMeetingCall {...liveCallProps} />
+      </div>
+    ) : null;
 
-    case "forgot":
-      return <ForgotPasswordPage onBackToLogin={() => setPage("login")} />;
+  const currentPage = (() => {
+    switch (page) {
+      case "login":
+        return (
+          <LoginPage
+            onLogin={handleLoggedIn}
+            onGoRegister={() => setPage("register")}
+            onForgotPassword={() => setPage("forgot")}
+          />
+        );
 
-    case "reset":
-      return <ResetPasswordPage token={resetToken} onBackToLogin={goToLogin} onResetComplete={goToLogin} />;
+      case "register":
+        return <RegisterPage onRegister={handleLoggedIn} onGoLogin={() => setPage("login")} />;
 
-    case "live":
-      return (
-        <LiveMeetingCall
-          meetingId={activeMeetingId}
-          currentUser={currentUser}
-          isHost={isMeetingHost}
-          onBack={() => setPage("dashboard")}
-          onHangUp={() => setPage("dashboard")}
-          onGeneratePrototype={() => setPage("pipeline")}
-        />
-      );
+      case "forgot":
+        return <ForgotPasswordPage onBackToLogin={() => setPage("login")} />;
 
-    case "dashboard":
-      return (
-        <DashboardPage
-          currentUser={currentUser}
-          onLogout={handleLogout}
-          onNewMeeting={startNewMeeting}
-          onResumeMeeting={resumeMeeting}
-          onJoinMeeting={joinMeeting}
-          onOpenWorkforce={() => setPage("workforce")}
-          onOpenPrototype={(meetingId) => {
-            if (meetingId) setActiveMeetingId(meetingId);
-            setPage("viewer");
-          }}
-        />
-      );
+      case "reset":
+        return <ResetPasswordPage token={resetToken} onBackToLogin={goToLogin} onResetComplete={goToLogin} />;
 
-    case "workforce":
-      return <AIWorkforcePage liveAgents={liveAgents} liveOutputs={liveOutputs} onNavigate={navigate} />;
+      case "live":
+        // Normally rendered by persistentLiveCall above. This fallback only
+        // fires if "live" is somehow shown without an active meeting, so we
+        // never mount two LiveMeetingCall instances at once.
+        return persistentLiveCall ? null : <LiveMeetingCall {...liveCallProps} />;
 
-    case "pipeline":
-      return <GenerationPipelinePage meetingId={activeMeetingId} onNavigate={navigate} onGenerationUpdate={handleGenerationUpdate} />;
+      case "dashboard":
+        return (
+          <DashboardPage
+            currentUser={currentUser}
+            onLogout={handleLogout}
+            onNewMeeting={startNewMeeting}
+            onResumeMeeting={resumeMeeting}
+            onJoinMeeting={joinMeeting}
+            onOpenWorkforce={() => setPage("workforce")}
+            onOpenPrototype={(meetingId) => {
+              if (meetingId) setActiveMeetingId(meetingId);
+              setPage("viewer");
+            }}
+          />
+        );
 
-    case "viewer":
-      return <PrototypeViewerPage meetingId={activeMeetingId} onNavigate={navigate} onOpenPipeline={() => setPage("pipeline")} />;
+      case "workforce":
+        return <AIWorkforcePage liveAgents={liveAgents} liveOutputs={liveOutputs} liveLogs={liveLogs} onNavigate={navigate} />;
 
-    case "home":
-    default:
-      return (
-        <HomePage
-          onLogin={() => setPage("login")}
-          onRegister={() => setPage("register")}
-          onGetStarted={() => setPage("register")}
-        />
-      );
-  }
+      case "pipeline":
+        return <GenerationPipelinePage meetingId={activeMeetingId} intent={pipelineIntent} onNavigate={navigate} onGenerationUpdate={handleGenerationUpdate} />;
+
+      case "viewer":
+        return <PrototypeViewerPage meetingId={activeMeetingId} onNavigate={navigate} onOpenPipeline={() => navigate("pipeline")} />;
+
+      case "home":
+      default:
+        return (
+          <HomePage
+            onLogin={() => setPage("login")}
+            onRegister={() => setPage("register")}
+            onGetStarted={() => setPage("register")}
+          />
+        );
+    }
+  })();
+
+  return (
+    <>
+      {persistentLiveCall}
+      {currentPage}
+    </>
+  );
 }

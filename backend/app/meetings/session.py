@@ -85,6 +85,20 @@ class MeetingSession:
     _id_counter: "itertools.count" = field(default_factory=lambda: itertools.count(1))
     _line_counter: "itertools.count" = field(default_factory=lambda: itertools.count(1))
 
+    # Set by SessionRegistry when the session is hydrated from / created into
+    # the SQLite store. None means "in-memory only" (direct constructor use —
+    # the path the existing unit tests take), in which case every mutator
+    # below behaves exactly as it did before persistence existed.
+    _store: object | None = field(default=None, repr=False, compare=False)
+
+    def _persist_line(self, line: TranscriptLine) -> None:
+        if self._store is not None:
+            self._store.insert_transcript_line(self.meeting_id, line)
+
+    def _persist_requirement(self, req: Requirement) -> None:
+        if self._store is not None:
+            self._store.insert_requirement(self.meeting_id, req)
+
     def add_transcript_line(
         self,
         speaker: str,
@@ -113,6 +127,7 @@ class MeetingSession:
         while index > 0 and self.transcript[index - 1].spoken_at > line.spoken_at:
             index -= 1
         self.transcript.insert(index, line)
+        self._persist_line(line)
         return line
 
     def set_translation(self, line_id: int, english_text: str) -> TranscriptLine | None:
@@ -120,6 +135,8 @@ class MeetingSession:
         for line in self.transcript:
             if line.id == line_id:
                 line.english_text = english_text
+                if self._store is not None:
+                    self._store.update_translation(self.meeting_id, line_id, english_text)
                 return line
         return None
 
@@ -134,9 +151,13 @@ class MeetingSession:
         this is why requirements can't be silently dropped.
         """
         wanted = set(line_ids)
+        touched = []
         for line in self.transcript:
             if line.id in wanted:
                 line.extracted = True
+                touched.append(line.id)
+        if self._store is not None and touched:
+            self._store.mark_lines_extracted(self.meeting_id, touched)
 
     def add_requirements(self, new_reqs: list[dict]) -> list[Requirement]:
         """
@@ -158,6 +179,7 @@ class MeetingSession:
                 confidence=int(r.get("confidence", 70)),
             )
             self.requirements.append(req)
+            self._persist_requirement(req)
             added.append(req)
         return added
 
@@ -187,9 +209,52 @@ class MeetingSession:
                 seen.append(line.language)
         return seen
 
+    def replace_agent_outputs(self, outputs: dict) -> None:
+        """
+        Sets the full agent_outputs dict — the pipeline overwrites the whole
+        set atomically after a run, rather than merging into it. Routes
+        through here (rather than assigning session.agent_outputs = ...)
+        so a store-backed session persists the replacement; direct dict
+        assignment still works in-memory for tests that build a session by
+        hand.
+        """
+        self.agent_outputs = dict(outputs)
+        if self._store is not None:
+            self._store.replace_agent_outputs(self.meeting_id, self.agent_outputs)
+
+    def update_requirement_status(self, requirement_id: int, status_value: str) -> "Requirement | None":
+        """Accept/reject a requirement (host-only at the API layer). Returns
+        the updated Requirement, or None if the id doesn't exist."""
+        for r in self.requirements:
+            if r.id == requirement_id:
+                r.status = status_value
+                if self._store is not None:
+                    self._store.update_requirement_status(self.meeting_id, requirement_id, status_value)
+                return r
+        return None
+
+    def update_requirement_title(self, requirement_id: int, title: str) -> "Requirement | None":
+        """Edit a requirement's title (host-only at the API layer)."""
+        for r in self.requirements:
+            if r.id == requirement_id:
+                r.title = title
+                if self._store is not None:
+                    self._store.update_requirement_title(self.meeting_id, requirement_id, title)
+                return r
+        return None
+
+    def rename(self, new_name: str) -> None:
+        """Rename the meeting (host-only at the API layer). Persists through
+        the same store hook get_or_create already uses to backfill a name."""
+        self.name = new_name
+        if self._store is not None:
+            self._store.update_meeting_name(self.meeting_id, new_name)
+
     def mark_ended(self):
         self.status = "ended"
         self.ended_at = datetime.datetime.utcnow().isoformat() + "Z"
+        if self._store is not None:
+            self._store.update_meeting_ended(self.meeting_id, self.status, self.ended_at)
 
     def is_host(self, user_id: str | None) -> bool:
         return user_id is not None and self.host_user_id == user_id
@@ -213,45 +278,153 @@ class MeetingSession:
 
 
 class SessionRegistry:
-    """Thread-safe registry so concurrent WebSocket connections don't race."""
+    """
+    Resolves a `MeetingSession` by id, lazily hydrating it from a
+    `SessionStore` the first time it's asked for. The in-process dict is
+    purely a hot-path cache: every mutation goes to the store, and a
+    process restart just re-populates from SQLite on demand.
 
-    def __init__(self):
+    Backwards-compat: when no store is configured, the registry behaves
+    exactly as it did before persistence was added — an in-memory dict,
+    lost on restart. This is the path the existing transcript-lines and
+    requirement-extraction tests exercise, because they construct
+    `MeetingSession` directly without ever calling `init_store()`. The
+    in-memory path is preserved so those tests keep running against the
+    pure dataclass API.
+    """
+
+    def __init__(self, store: "object | None" = None):
+        # Using "object | None" + duck typing so this module doesn't have
+        # to import app.meetings.store at top level (the store imports
+        # MeetingSession from this module — a cycle).
+        self._store = store
         self._sessions: dict[str, MeetingSession] = {}
         self._lock = threading.Lock()
 
-    def get_or_create(self, meeting_id: str, name: str | None = None, host_user_id: str | None = None) -> MeetingSession:
+    def set_store(self, store) -> None:
+        """Late-bind the SQLite store. Called once at startup from
+        main.py. After this is set, the registry stops using the
+        in-memory-only path."""
         with self._lock:
-            if meeting_id not in self._sessions:
-                self._sessions[meeting_id] = MeetingSession(
-                    meeting_id=meeting_id,
-                    name=name or "Untitled Meeting",
-                    host_user_id=host_user_id,
-                )
-            else:
-                session = self._sessions[meeting_id]
-                if name:
-                    # If a name arrives later (e.g. Create Meeting form) and the
-                    # session already exists, update it rather than ignore it.
-                    session.name = name
-                if session.host_user_id is None and host_user_id is not None:
-                    # Backfills the host if the session was somehow created
-                    # before a host was known — does NOT override an existing host.
-                    session.host_user_id = host_user_id
-            return self._sessions[meeting_id]
+            self._store = store
+            # Drop the cache so the next read re-hydrates from the store —
+            # any objects still in the cache were loaded from a no-store
+            # world and may not match what's in the DB.
+            self._sessions.clear()
+
+    def _has_store(self) -> bool:
+        return self._store is not None
+
+    def _hydrate(self, meeting_id: str) -> MeetingSession | None:
+        """Pull a session from the store and cache it. Returns None if no
+        such meeting exists in the store."""
+        assert self._store is not None
+        loaded = self._store.load_meeting(meeting_id)
+        if loaded is not None:
+            loaded._store = self._store  # write-through from here on
+            self._sessions[meeting_id] = loaded
+        return loaded
+
+    def get_or_create(self, meeting_id: str, name: str | None = None, host_user_id: str | None = None) -> MeetingSession:
+        # The store path is the source of truth — first consult the cache,
+        # then the store, then create-and-persist.
+        with self._lock:
+            if not self._has_store():
+                # In-memory fallback for tests / unconfigured environments.
+                return self._get_or_create_in_memory(meeting_id, name, host_user_id)
+
+            session = self._sessions.get(meeting_id)
+            if session is None:
+                loaded = self._hydrate(meeting_id)
+                if loaded is not None:
+                    session = loaded
+                else:
+                    session = MeetingSession(
+                        meeting_id=meeting_id,
+                        name=name or "Untitled Meeting",
+                        host_user_id=host_user_id,
+                    )
+                    session._store = self._store
+                    self._store.insert_meeting(session)
+                    self._sessions[meeting_id] = session
+                    return session
+
+            # Existing session: apply the same get_or_create semantics that
+            # the in-memory version enforced, and persist the backfill.
+            if name and session.name != name:
+                session.name = name
+                self._store.update_meeting_name(meeting_id, name)
+            if session.host_user_id is None and host_user_id is not None:
+                # Backfills the host if the session was somehow created
+                # before a host was known — does NOT override an existing host.
+                session.host_user_id = host_user_id
+                self._store.update_meeting_host(meeting_id, host_user_id)
+            return session
+
+    def _get_or_create_in_memory(self, meeting_id: str, name: str | None, host_user_id: str | None) -> MeetingSession:
+        """The pre-persistence behaviour, kept verbatim so the existing
+        transcript-lines and requirement-extraction tests continue to work
+        without a store."""
+        if meeting_id not in self._sessions:
+            self._sessions[meeting_id] = MeetingSession(
+                meeting_id=meeting_id,
+                name=name or "Untitled Meeting",
+                host_user_id=host_user_id,
+            )
+        else:
+            session = self._sessions[meeting_id]
+            if name:
+                session.name = name
+            if session.host_user_id is None and host_user_id is not None:
+                session.host_user_id = host_user_id
+        return self._sessions[meeting_id]
 
     def get(self, meeting_id: str) -> MeetingSession | None:
-        return self._sessions.get(meeting_id)
+        with self._lock:
+            session = self._sessions.get(meeting_id)
+            if session is not None:
+                return session
+            if not self._has_store():
+                return None
+            return self._hydrate(meeting_id)
 
     def list_all(self) -> list[MeetingSession]:
-        # Most recent first.
-        return sorted(self._sessions.values(), key=lambda s: s.created_at, reverse=True)
+        if not self._has_store():
+            # Pre-persistence behaviour: most recent first.
+            return sorted(self._sessions.values(), key=lambda s: s.created_at, reverse=True)
+
+        with self._lock:
+            # Drop the in-process cache for any id that no longer exists
+            # in the store (e.g. deleted in another process, or via a
+            # direct SQL DELETE during dev).
+            live_ids = set(self._store.list_meeting_ids())
+            stale = [mid for mid in self._sessions if mid not in live_ids]
+            for mid in stale:
+                self._sessions.pop(mid, None)
+
+            # Hydrate anything in the store that isn't cached.
+            for mid in live_ids:
+                if mid not in self._sessions:
+                    self._hydrate(mid)
+
+            return sorted(
+                (self._sessions[mid] for mid in live_ids),
+                key=lambda s: s.created_at,
+                reverse=True,
+            )
 
     def delete(self, meeting_id: str) -> bool:
         with self._lock:
-            if meeting_id in self._sessions:
-                del self._sessions[meeting_id]
-                return True
-            return False
+            if not self._has_store():
+                if meeting_id in self._sessions:
+                    del self._sessions[meeting_id]
+                    return True
+                return False
+            # Drop from the cache first so a concurrent reader between
+            # the store delete and the next get_or_create doesn't see a
+            # stale MeetingSession pointing at rows that are gone.
+            self._sessions.pop(meeting_id, None)
+            return self._store.delete_meeting(meeting_id)
 
 
 # Single shared registry for the process.

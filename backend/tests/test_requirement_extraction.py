@@ -21,6 +21,12 @@ import sys
 import types
 import unittest
 
+try:
+    from tests import stubs
+except ImportError:  # discovered with tests/ as the root dir
+    import stubs
+stubs.install()
+
 # Several tests exercise the failure paths on purpose, which log warnings.
 # Keep the test output about the assertions, not the expected noise.
 logging.getLogger("protopilot.requirements").setLevel(logging.CRITICAL)
@@ -40,9 +46,13 @@ class _FakeRouter:
         self.reply = "[]"
         self.delay = 0.0
         self.raise_exc = None
+        # Kept so a test can assert which token budget the extractor asked
+        # for: too small a budget is how a reasoning model returns nothing.
+        self.last_kwargs: dict = {}
 
     async def chat(self, messages, **kwargs):
         self.calls.append(messages)
+        self.last_kwargs = kwargs
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.raise_exc:
@@ -69,6 +79,7 @@ class ExtractionTestCase(unittest.IsolatedAsyncioTestCase):
         fake_router.reply = "[]"
         fake_router.delay = 0.0
         fake_router.raise_exc = None
+        fake_router.last_kwargs = {}
         extractor._locks.clear()
         self.session = MeetingSession(meeting_id=self.meeting_id)
 
@@ -211,6 +222,60 @@ class FailureHandlingTest(ExtractionTestCase):
 
         self.assertEqual([r["title"] for r in found], ["Admin panel"])
         self.assertEqual(self.pending_ids(), [])
+
+
+class ReplyWrappingTest(ExtractionTestCase):
+    """
+    The prompt says "reply with a JSON array and nothing else"; models add
+    fences and pleasantries anyway. Every wrapping that still contains the
+    array must survive, because the alternative is a client watching an
+    empty Points panel while a perfectly good answer is thrown away.
+    """
+
+    ARRAY = '[{"title": "Admin panel", "category": "General", "priority": "Low", "confidence": 70}]'
+
+    async def _extract(self, reply):
+        fake_router.reply = reply
+        line = self.session.add_transcript_line("A", "en", "we need an admin panel")
+        return await extractor.extract_new_requirements(self.session), line
+
+    async def test_json_fences(self):
+        found, _ = await self._extract("```json\n" + self.ARRAY + "\n```")
+        self.assertEqual([r["title"] for r in found], ["Admin panel"])
+        self.assertEqual(self.pending_ids(), [])
+
+    async def test_a_preamble_and_a_closing_sentence(self):
+        found, _ = await self._extract(
+            "Sure! Here are the requirements I found:\n" + self.ARRAY + "\nLet me know if you "
+            "want more detail."
+        )
+        self.assertEqual([r["title"] for r in found], ["Admin panel"])
+        self.assertEqual(self.pending_ids(), [], "a chatty model must not cost a round")
+
+    async def test_a_fenced_array_with_a_preamble(self):
+        found, _ = await self._extract("Here you go:\n```json\n" + self.ARRAY + "\n```")
+        self.assertEqual([r["title"] for r in found], ["Admin panel"])
+
+    async def test_a_truncated_array_stays_pending(self):
+        # finish_reason=length mid-array: there is a "[" but no closing "]".
+        found, line = await self._extract('[{"title": "Admin pan')
+        self.assertEqual(found, [])
+        self.assertEqual(self.pending_ids(), [line.id])
+
+    async def test_no_text_at_all_stays_pending(self):
+        found, line = await self._extract(None)
+        self.assertEqual(found, [])
+        self.assertEqual(self.pending_ids(), [line.id])
+
+    async def test_the_extractor_asks_for_the_configured_budget(self):
+        # 800 was hardcoded here, below the agents' own 1600, on the one call
+        # the Points panel depends on.
+        from app.config import settings
+
+        await self._extract(self.ARRAY)
+        self.assertEqual(fake_router.last_kwargs.get("max_tokens"),
+                         settings.llm_default_max_tokens)
+        self.assertGreaterEqual(settings.llm_default_max_tokens, 1600)
 
 
 class BacklogCapTest(ExtractionTestCase):

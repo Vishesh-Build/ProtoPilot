@@ -26,7 +26,7 @@
       like it's still ProtoPilot.
    ============================================================ */
 
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
@@ -34,11 +34,72 @@ const fs = require("fs");
 const APP_PORT = 5173;
 const APP_URL = `http://localhost:${APP_PORT}`;
 
+/* ------------------------------------------------------------
+   Backend API URL resolution (runtime, not build time).
+
+   Priority:
+     1. PROTOPILOT_API_URL env var (dev convenience: set it in the
+        shell before `npm run electron:dev`)
+     2. The user's saved choice in userData/config.json — this is what
+        makes an INSTALLED (NSIS) app pointable at any backend without
+        rebuilding. Written by setApiBaseUrl below; today that's called
+        programmatically, and a Settings UI can call it later.
+     3. http://localhost:8000 (dev default, same as the renderer's
+        own fallback so both agree out of the box).
+
+   In a packaged build Vite has already baked VITE_API_BASE_URL into
+   the bundle, which is why a runtime override is the piece that was
+   missing: without it an installed app could only ever talk to
+   whatever URL was on the machine that ran the build.
+   ------------------------------------------------------------ */
+const DEFAULT_API_BASE_URL = "http://localhost:8000";
+
+function configPath() {
+  return path.join(app.getPath("userData"), "config.json");
+}
+
+function readSavedApiBaseUrl() {
+  try {
+    const raw = fs.readFileSync(configPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.apiBaseUrl === "string" && /^https?:\/\//.test(parsed.apiBaseUrl)) {
+      return parsed.apiBaseUrl.replace(/\/+$/, "");
+    }
+  } catch {
+    /* no config yet, or unreadable — fall through */
+  }
+  return null;
+}
+
+function resolveApiBaseUrl() {
+  const fromEnv = process.env.PROTOPILOT_API_URL;
+  if (fromEnv && /^https?:\/\//.test(fromEnv)) {
+    return fromEnv.replace(/\/+$/, "");
+  }
+  return readSavedApiBaseUrl() || DEFAULT_API_BASE_URL;
+}
+
+function setApiBaseUrl(url) {
+  if (!/^https?:\/\//.test(url)) {
+    throw new Error("API base URL must start with http:// or https://");
+  }
+  const cleaned = url.replace(/\/+$/, "");
+  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify({ apiBaseUrl: cleaned }, null, 2));
+  return cleaned;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
+
+ipcMain.on("protopilot:get-api-base-url", (event) => {
+  event.returnValue = API_BASE_URL;
+});
+
 // Origins the app window is allowed to navigate to directly.
 // Everything else opens in the system browser via shell.openExternal.
 const ALLOWED_NAVIGATION_ORIGINS = [
   APP_URL,
-  "http://localhost:8000", // backend, during local dev
+  API_BASE_URL, // the configured backend — wherever it actually is
   "https://accounts.google.com",
   "https://oauth2.googleapis.com",
   "https://openidconnect.googleapis.com",

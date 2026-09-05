@@ -10,7 +10,11 @@
    ============================================================ */
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  (typeof window !== "undefined" &&
+    window.protopilotDesktop &&
+    window.protopilotDesktop.apiBaseUrl) || // Electron: runtime-configurable (main.cjs)
+  import.meta.env.VITE_API_BASE_URL || // plain browser/Vite build
+  "http://localhost:8000";
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -18,6 +22,55 @@ class ApiError extends Error {
     this.status = status;
   }
 }
+
+/* ------------------------------------------------------------
+   Silent session renewal.
+
+   The access_token cookie expires (default a few hours) long before the
+   refresh_token cookie (30 days). The backend exposes POST /auth/refresh
+   which rotates both cookies, but until now the frontend never called
+   it — a 30-minute meeting always ended in a forced logout.
+
+   On a 401, we try ONE refresh and replay the original request. Auth
+   endpoints themselves never trigger a refresh (their 401 is a real
+   "wrong credentials" / "expired reset link", and retrying them would
+   loop). Concurrent 401s share a single refresh call — without that, a
+   burst of parallel requests would stampede the refresh endpoint and
+   the second one would invalidate the first's freshly rotated cookie.
+   ------------------------------------------------------------ */
+let _refreshInFlight = null;
+
+async function refreshSession() {
+  if (!_refreshInFlight) {
+    _refreshInFlight = (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!res.ok) return false;
+        return true;
+      } catch {
+        return false;
+      } finally {
+        // Keep the promise cached only while it is pending; the next 401
+        // (e.g. after the new access token also expires) must be able to
+        // refresh again.
+        setTimeout(() => { _refreshInFlight = null; }, 0);
+      }
+    })();
+  }
+  return _refreshInFlight;
+}
+
+const _NO_REFRESH = new Set([
+  "/auth/login",
+  "/auth/register",
+  "/auth/refresh",
+  "/auth/logout",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+]);
 
 async function request(path, options = {}) {
   let res;
@@ -32,6 +85,25 @@ async function request(path, options = {}) {
       "Can't reach the server — check your connection and that the backend is running.",
       0
     );
+  }
+
+  // Access token expired mid-session: silently renew once and replay.
+  if (res.status === 401 && !_NO_REFRESH.has(path)) {
+    const renewed = await refreshSession();
+    if (renewed) {
+      try {
+        res = await fetch(`${API_BASE_URL}${path}`, {
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+      } catch {
+        throw new ApiError(
+          "Can't reach the server — check your connection and that the backend is running.",
+          0
+        );
+      }
+    }
   }
 
   let data = null;
@@ -103,6 +175,12 @@ export const meetingsApi = {
 
   listRequirements: (meetingId) => request(`/meetings/${meetingId}/requirements`),
 
+  addRequirement: (meetingId, title) =>
+    request(`/meetings/${meetingId}/requirements`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+
   updateRequirementStatus: (meetingId, requirementId, status) =>
     request(`/meetings/${meetingId}/requirements/${requirementId}/status`, {
       method: "PATCH",
@@ -117,6 +195,12 @@ export const meetingsApi = {
 
   list: () => request("/meetings"),
 
+  rename: (meetingId, name) =>
+    request(`/meetings/${meetingId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+
   delete: (meetingId) => request(`/meetings/${meetingId}`, { method: "DELETE" }),
 
   agentOutputs: (meetingId) => request(`/meetings/${meetingId}/agent-outputs`),
@@ -128,8 +212,13 @@ export const meetingsApi = {
   transcriptSocketUrl: (meetingId) =>
     `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}`,
 
-  generateSocketUrl: (meetingId) =>
-    `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}/generate`,
+  // force=true skips the backend's replay-of-existing-outputs guard, so the
+  // host pressing "Regenerate" re-runs over the currently-approved
+  // requirements (picking up anything approved since the last build) instead
+  // of getting the stale prototype back. Opening it without force is a plain
+  // (free) replay of what's already there.
+  generateSocketUrl: (meetingId, { force = false } = {}) =>
+    `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}/generate${force ? "?force=1" : ""}`,
 };
 
 export { ApiError };

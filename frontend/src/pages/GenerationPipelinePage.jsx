@@ -224,20 +224,59 @@ const NAV_TABS = [
   { label: "Prototype Viewer", icon: Eye },
 ];
 
-export default function GenerationPipelinePage({ meetingId, onNavigate, onGenerationUpdate }) {
+export default function GenerationPipelinePage({ meetingId, intent = "view", onNavigate, onGenerationUpdate }) {
   const [selectedId, setSelectedId] = useState("prototype");
   const [agents, setAgents] = useState({});
   const [outputs, setOutputs] = useState({});
+  const [logs, setLogs] = useState({});
   const [pipelineError, setPipelineError] = useState(null);
   const [finished, setFinished] = useState(false);
+  // View mode only: the meeting has no generated outputs yet, so there's
+  // nothing to replay. Distinct from an in-progress run.
+  const [viewEmpty, setViewEmpty] = useState(false);
   const socketRef = useRef(null);
+  // Mirrors `finished` so the socket close/error handlers can read it without
+  // re-binding — the handlers are created once per mount, and a stale closure
+  // would otherwise claim "lost connection" after a clean finish.
+  const finishedRef = useRef(false);
 
-  // Connecting this socket IS what starts the real backend pipeline
-  // (app/ws/generate.py) — runs once per mount, not per render.
+  // What opening this page does depends on WHY it was opened:
+  //   • "view" — replay the already-built outputs over plain HTTP. The
+  //     generate socket is never opened (opening it is a server-side trigger),
+  //     so merely navigating in can never start or re-run a paid pipeline.
+  //   • "run"  — the host pressed Generate/Regenerate. Connecting this socket
+  //     with force=1 IS what starts the real backend pipeline
+  //     (app/ws/generate.py), re-running over the currently-approved
+  //     requirements (so a requirement approved after the last build is
+  //     picked up).
+  // Runs once per mount, not per render.
   useEffect(() => {
     if (!meetingId) return undefined;
 
-    const socket = new WebSocket(meetingsApi.generateSocketUrl(meetingId));
+    if (intent !== "run") {
+      let cancelled = false;
+      meetingsApi.agentOutputs(meetingId)
+        .then((data) => {
+          if (cancelled) return;
+          const outs = data.agent_outputs || {};
+          if (Object.keys(outs).length === 0) {
+            setViewEmpty(true);
+            return;
+          }
+          setOutputs(outs);
+          setAgents(
+            Object.fromEntries(
+              Object.keys(outs).map((id) => [id, { status: "completed", progress: 100 }]),
+            ),
+          );
+          finishedRef.current = true;
+          setFinished(true);
+        })
+        .catch(() => { if (!cancelled) setViewEmpty(true); });
+      return () => { cancelled = true; };
+    }
+
+    const socket = new WebSocket(meetingsApi.generateSocketUrl(meetingId, { force: true }));
     socketRef.current = socket;
 
     socket.onmessage = (event) => {
@@ -248,33 +287,71 @@ export default function GenerationPipelinePage({ meetingId, onNavigate, onGenera
         setAgents((prev) => ({ ...prev, [data.agent]: { status: data.status, progress: data.progress } }));
       } else if (data.type === "agent_output") {
         setOutputs((prev) => ({ ...prev, [data.agent]: data.output }));
+      } else if (data.type === "agent_log") {
+        const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        setLogs((prev) => {
+          const existing = prev[data.agent] || [];
+          return { ...prev, [data.agent]: [...existing, `[${stamp}] ${data.message}`] };
+        });
       } else if (data.type === "pipeline_complete") {
+        finishedRef.current = true;
         setFinished(true);
+      } else if (data.type === "pipeline_failed") {
+        // The run is OVER — an agent failed, and the backend says which. This
+        // must not produce "Prototype ready" below; the banner carries the
+        // truth instead.
+        finishedRef.current = true;
+        setFinished(true);
+        setPipelineError(data.message || "Generation finished with failures.");
       } else if (data.type === "error") {
         setPipelineError(data.message);
       }
     };
-    socket.onerror = () => setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+    // onerror fires (followed by onclose) in a couple of innocent cases — for
+    // example React dev's StrictMode double-mount closes the first socket
+    // while it is still CONNECTING, which the spec counts as a failure. Once
+    // the verdict (pipeline_complete / pipeline_failed) is in, the connection
+    // dying means nothing, so both handlers stay silent.
+    socket.onerror = () => {
+      if (!finishedRef.current) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+    };
+    socket.onclose = () => {
+      // The server closes the socket when a run ends. If no verdict arrived,
+      // that is a genuine disconnection — never leave a "Build running"
+      // spinner forever.
+      if (!finishedRef.current) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+    };
 
-    return () => socket.close();
+    return () => {
+      // Detach BEFORE closing. React dev's StrictMode double-mount closes this
+      // socket while CONNECTING, and per spec a close during CONNECTING fires
+      // error then close — a dying mount's socket must not be allowed to paint
+      // "Lost connection" over the live socket that replaced it.
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
+      socket.close();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingId]);
+  }, [meetingId, intent]);
 
   // Lift the live state up to App.jsx so AI Workforce can show it too.
   useEffect(() => {
-    onGenerationUpdate?.(agents, outputs);
-  }, [agents, outputs, onGenerationUpdate]);
+    onGenerationUpdate?.(agents, outputs, logs);
+  }, [agents, outputs, logs, onGenerationUpdate]);
 
   const merged = AGENT_TEMPLATE.map((t) => ({
     ...t,
     status: agents[t.id]?.status || "idle",
     progress: agents[t.id]?.progress ?? 0,
     realOutput: outputs[t.id],
+    realLogs: logs[t.id] || [],
   }));
   const agentLookup = Object.fromEntries(merged.map((a) => [a.id, a]));
   const stage = agentLookup[selectedId] || merged[0];
 
   const completedCount = merged.filter((s) => s.status === "completed").length;
+  const failedCount = merged.filter((s) => s.status === "failed").length;
   const overallPct = Math.round(merged.reduce((sum, s) => sum + s.progress, 0) / merged.length);
 
   if (!meetingId) {
@@ -283,6 +360,28 @@ export default function GenerationPipelinePage({ meetingId, onNavigate, onGenera
         <style>{styles}</style>
         <div style={{ textAlign: "center", color: "#767A8C", fontSize: 13 }}>
           No active meeting — start one from the Dashboard first.
+        </div>
+      </div>
+    );
+  }
+
+  // Viewed (not run) for a meeting that hasn't generated anything yet — there
+  // is nothing to replay, so guide the host back rather than show 9 idle nodes.
+  if (viewEmpty) {
+    return (
+      <div className="gp-root" style={{ alignItems: "center", justifyContent: "center" }}>
+        <style>{styles}</style>
+        <div className="gp-bg-layer" />
+        <div className="gp-bg-tint" />
+        <div style={{ textAlign: "center", color: "#767A8C", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 14, maxWidth: 380, padding: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#3A3C46" }} className="gp-display">Nothing generated yet</div>
+          <div style={{ lineHeight: 1.6 }}>Head back to the meeting and press <b>Generate Prototype</b> once a few requirements are approved.</div>
+          <button
+            onClick={() => onNavigate?.("live")}
+            style={{ marginTop: 4, background: "linear-gradient(135deg,#4A63E8,#7C6BEA)", color: "#fff", border: "none", borderRadius: 999, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+          >
+            Back to meeting
+          </button>
         </div>
       </div>
     );
@@ -315,8 +414,12 @@ export default function GenerationPipelinePage({ meetingId, onNavigate, onGenera
           ))}
         </div>
         <div className="gp-nav-meta">
-          <span>{completedCount}/{merged.length} stages complete</span>
+          <span>
+            {completedCount}/{merged.length} stages complete
+            {failedCount > 0 && <span style={{ color: "#E14B4B" }}> · {failedCount} failed</span>}
+          </span>
           {!finished && !pipelineError && <span className="gp-nav-pill"><span className="gp-dot" />Build running</span>}
+          {finished && failedCount > 0 && <span className="gp-nav-pill" style={{ color: "#E14B4B" }}>Build failed</span>}
         </div>
       </div>
 
@@ -392,20 +495,28 @@ export default function GenerationPipelinePage({ meetingId, onNavigate, onGenera
           <div className="gp-panel">
             <div className="gp-panel-title"><Terminal size={12} /> Live output</div>
             <div className="gp-log-box gp-mono">
-              {stage.status === "idle" && (
-                <div className="gp-log-line" style={{ color: "#5B5F70" }}>Waiting on dependencies…</div>
-              )}
-              {(stage.status === "working" || stage.status === "thinking") && (
-                <div className="gp-log-line" style={{ color: "#6FE6C4" }}>{stage.status === "thinking" ? "Reading input from dependencies…" : "Generating…"}</div>
-              )}
-              {stage.status === "completed" && stage.id === "prototype" && (
-                <div className="gp-log-line" style={{ color: "#6FE6C4" }}>Prototype generated — open Prototype Viewer to see it.</div>
-              )}
-              {stage.status === "completed" && stage.id !== "prototype" && (
-                <div className="gp-log-line">{stage.realOutput || "Completed."}</div>
-              )}
-              {stage.status === "failed" && (
-                <div className="gp-log-line" style={{ color: "#FF6B6B" }}>Failed — check the backend server logs.</div>
+              {stage.realLogs.length > 0 ? (
+                stage.realLogs.map((line, i) => (
+                  <div key={i} className="gp-log-line">{line}</div>
+                ))
+              ) : (
+                <>
+                  {stage.status === "idle" && (
+                    <div className="gp-log-line" style={{ color: "#5B5F70" }}>Waiting on dependencies...</div>
+                  )}
+                  {(stage.status === "working" || stage.status === "thinking") && (
+                    <div className="gp-log-line" style={{ color: "#6FE6C4" }}>{stage.status === "thinking" ? "Reading input from dependencies..." : "Generating..."}</div>
+                  )}
+                  {stage.status === "completed" && stage.id !== "prototype" && (
+                    <div className="gp-log-line">{stage.realOutput || "Completed."}</div>
+                  )}
+                  {stage.status === "completed" && stage.id === "prototype" && (
+                    <div className="gp-log-line" style={{ color: "#6FE6C4" }}>Prototype generated — open Prototype Viewer to see it.</div>
+                  )}
+                  {stage.status === "failed" && (
+                    <div className="gp-log-line" style={{ color: "#FF6B6B" }}>Failed — check the backend server logs.</div>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -429,7 +540,7 @@ export default function GenerationPipelinePage({ meetingId, onNavigate, onGenera
             </div>
           )}
 
-          {finished && (
+          {finished && failedCount === 0 && (
             <div className="gp-panel" style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => onNavigate?.("viewer")}>
               <Rocket size={14} color="#4A63E8" />
               <span style={{ fontSize: 12.5, fontWeight: 600 }}>Prototype ready — open it in Prototype Viewer.</span>

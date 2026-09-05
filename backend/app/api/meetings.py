@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.deps import get_current_user
@@ -11,6 +11,10 @@ router = APIRouter(prefix="/meetings", tags=["meetings"])
 
 class CreateMeetingRequest(BaseModel):
     meeting_id: str
+    name: str
+
+
+class RenameMeetingRequest(BaseModel):
     name: str
 
 
@@ -70,6 +74,19 @@ async def end_meeting(session: MeetingSession = Depends(require_meeting_host)):
     from app.livekit.bot_manager import bot_manager
     await bot_manager.stop(session.meeting_id)
     session.mark_ended()
+    return session.summary()
+
+
+@router.patch("/{meeting_id}")
+async def rename_meeting(
+    body: RenameMeetingRequest,
+    session: MeetingSession = Depends(require_meeting_host),
+):
+    """Rename a meeting from Meeting History's rename action. Host only."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Meeting name can't be empty.")
+    session.rename(name)
     return session.summary()
 
 
