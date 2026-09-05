@@ -57,9 +57,10 @@ const styles = `
   .gp-nav-brand { display: flex; align-items: center; gap: 8px; margin-right: 6px; }
   .gp-nav-mark {
     width: 24px; height: 24px; border-radius: 7px;
-    background: linear-gradient(135deg, #00E6A8, #4A63E8);
     display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
   }
+  .gp-nav-mark img { width: 100%; height: 100%; object-fit: contain; }
   .gp-nav-tabs { display: flex; align-items: center; gap: 2px; flex: 1; overflow-x: auto; }
   .gp-nav-tab {
     display: flex; align-items: center; gap: 6px;
@@ -395,7 +396,7 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
 
       <div className="gp-nav">
         <div className="gp-nav-brand">
-          <div className="gp-nav-mark"><Radio size={12} color="#fff" /></div>
+          <div className="gp-nav-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
         </div>
         <div className="gp-nav-tabs">
           {NAV_TABS.map((t) => (

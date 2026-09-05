@@ -72,10 +72,10 @@ const styles = `
   .auth-logo { position: relative; z-index: 2; display: flex; align-items: center; gap: 9px; }
   .auth-logo-mark {
     width: 30px; height: 30px; border-radius: 9px;
-    background: linear-gradient(135deg, #00E6A8, #4A63E8);
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 12px rgba(74,99,232,0.35);
+    overflow: hidden;
   }
+  .auth-logo-mark img { width: 100%; height: 100%; object-fit: contain; }
   .auth-logo-text { font-weight: 700; font-size: 16px; }
 
   .auth-left-mid { position: relative; z-index: 2; max-width: 460px; }
@@ -233,7 +233,7 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
         <LeftArcs />
 
         <div className="auth-logo">
-          <div className="auth-logo-mark"><Radio size={14} color="#fff" /></div>
+          <div className="auth-logo-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
           <span className="auth-logo-text auth-display">ProtoPilot</span>
         </div>
 

@@ -55,9 +55,10 @@ const styles = `
   }
   .db-nav-mark {
     width: 24px; height: 24px; border-radius: 7px; margin-right: 6px;
-    background: linear-gradient(135deg, #00E6A8, #4A63E8);
     display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
   }
+  .db-nav-mark img { width: 100%; height: 100%; object-fit: contain; }
   .db-nav-tabs { display: flex; align-items: center; gap: 2px; flex: 1; overflow-x: auto; }
   .db-nav-tab {
     display: flex; align-items: center; gap: 6px;
@@ -338,7 +339,7 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
       <div className="db-bg-tint" />
 
       <div className="db-nav">
-        <div className="db-nav-mark"><Radio size={12} color="#fff" /></div>
+        <div className="db-nav-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
         <div className="db-nav-tabs">
           {NAV_TABS.map((t) => (
             <div

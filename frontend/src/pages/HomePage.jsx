@@ -51,10 +51,10 @@ const styles = `
   .pp-logo { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; color: #14151B; }
   .pp-logo-mark {
     width: 26px; height: 26px; border-radius: 8px;
-    background: linear-gradient(135deg, #00E6A8, #4A63E8);
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 12px rgba(74,99,232,0.35);
+    overflow: hidden;
   }
+  .pp-logo-mark img { width: 100%; height: 100%; object-fit: contain; }
   .pp-nav-actions { display: flex; align-items: center; gap: 10px; }
   .pp-btn-ghost {
     display: flex; align-items: center; gap: 7px;
@@ -356,7 +356,7 @@ export default function HomePage({ onLogin, onRegister, onGetStarted }) {
         transition: "all 0.25s ease",
       }}>
         <div className="pp-logo">
-          <div className="pp-logo-mark"><Radio size={13} color="#fff" /></div>
+          <div className="pp-logo-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
           <span className="pp-display">ProtoPilot</span>
         </div>
         <div className="pp-nav-actions">

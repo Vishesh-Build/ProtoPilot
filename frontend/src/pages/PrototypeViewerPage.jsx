@@ -57,9 +57,10 @@ const styles = `
   }
   .pv-nav-mark {
     width: 24px; height: 24px; border-radius: 7px; margin-right: 6px;
-    background: linear-gradient(135deg, #00E6A8, #4A63E8);
     display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
   }
+  .pv-nav-mark img { width: 100%; height: 100%; object-fit: contain; }
   .pv-nav-tabs { display: flex; align-items: center; gap: 2px; flex: 1; overflow-x: auto; }
   .pv-nav-tab {
     display: flex; align-items: center; gap: 6px;
@@ -252,7 +253,7 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
       <div className="pv-bg-tint" />
 
       <div className="pv-nav">
-        <div className="pv-nav-mark"><Radio size={12} color="#fff" /></div>
+        <div className="pv-nav-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
         <div className="pv-nav-tabs">
           {NAV_TABS.map((t) => (
             <div key={t.label} className={`pv-nav-tab ${t.active ? "active" : ""}`} onClick={() => goTab(t.label)}>
