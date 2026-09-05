@@ -62,10 +62,20 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+
+# NOTE: `mcp` is imported lazily inside _generate_prototype_html_once (below),
+# NOT at module top. Stitch is an OPTIONAL feature — when it isn't configured
+# (or the mcp package is a version whose API has shifted, which is exactly what
+# broke the Render deploy: `streamablehttp_client` had moved), the whole
+# backend must still import and run, falling back to the LLM-generated HTML.
+# A top-level `from mcp...` import made an optional dependency able to crash the
+# entire app at startup. Keeping it lazy means only a real Stitch call can hit
+# an mcp problem, and that call already degrades to the LLM path.
+if TYPE_CHECKING:
+    from mcp import ClientSession
 
 from app.config import settings
 
@@ -107,7 +117,7 @@ def _tool_result_json(result):
     raise RuntimeError("Stitch tool call returned no text content to parse")
 
 
-async def _get_or_create_project(session: ClientSession) -> str:
+async def _get_or_create_project(session: "ClientSession") -> str:
     global _cached_project_id
 
     if settings.stitch_project_id:
@@ -502,6 +512,12 @@ async def _generate_prototype_html_once(context: str) -> str | None:
     prompt = _build_stitch_prompt(context)
     headers = {"X-Goog-Api-Key": settings.stitch_api_key}
     logger.info("Stitch: starting generation (project_id_configured=%s)", bool(settings.stitch_project_id))
+
+    # Imported here, not at module top, so an mcp import/version problem can
+    # only ever fail an actual Stitch call (which the caller catches and falls
+    # back to the LLM path for) — never the whole backend at startup.
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
 
     async with streamablehttp_client(STITCH_MCP_URL, headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
