@@ -38,7 +38,8 @@
       {
         "provider": "github",
         "owner": "Vishesh-Build",
-        "repo": "ProtoPilot"
+        "repo": "ProtoPilot",
+        "releaseType": "release"
       }
     ],
     "win": { "target": "nsis", "icon": "build/icon.ico" },
