@@ -27,4 +27,16 @@ contextBridge.exposeInMainWorld("protopilotDesktop", {
     electron: process.versions.electron,
     chrome: process.versions.chrome,
   },
+  // --- Auto-update bridge ---
+  // The renderer shows an "Update ready — Restart" button only when the
+  // main process reports status "ready". Everything update-related is
+  // funnelled through these three calls; the renderer has no other access.
+  getUpdateState: () => ipcRenderer.invoke("protopilot:get-update-state"),
+  installUpdate: () => ipcRenderer.invoke("protopilot:install-update"),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("protopilot:update-state", listener);
+    // Return an unsubscribe fn so React effects can clean up.
+    return () => ipcRenderer.removeListener("protopilot:update-state", listener);
+  },
 });

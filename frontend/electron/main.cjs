@@ -30,6 +30,10 @@ const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
+// electron-updater is imported lazily inside setupAutoUpdater() so a dev run
+// (npm run electron:dev, app NOT packaged) never touches it — it only matters
+// for an installed NSIS build talking to GitHub Releases.
+let autoUpdater = null;
 
 const APP_PORT = 5173;
 const APP_URL = `http://localhost:${APP_PORT}`;
@@ -160,6 +164,79 @@ function startProductionServer(distDir) {
   });
 }
 
+/* ------------------------------------------------------------
+   Auto-update (electron-updater + GitHub Releases).
+
+   How it reaches an installed .exe:
+     1. You bump "version" in package.json and run `npm run release:win`.
+        electron-builder builds the NSIS installer AND uploads it (plus a
+        latest.yml manifest) to a GitHub Release.
+     2. Every installed app, on launch, quietly asks GitHub "is there a
+        newer version than mine?" by reading that latest.yml.
+     3. If yes, it downloads the new installer in the background, then tells
+        the renderer — which shows an "Update ready — Restart" button. The
+        user clicks it when convenient; nothing is forced.
+
+   The code repo can stay PRIVATE as long as the *Releases* are public,
+   because electron-updater only needs to read the release assets, which
+   GitHub serves without a token for public releases.
+
+   Guarded so it's a no-op in dev (app not packaged) and never crashes the
+   app if electron-updater is missing or GitHub is unreachable.
+   ------------------------------------------------------------ */
+let latestUpdateState = { status: "idle", version: null, error: null };
+
+function setupAutoUpdater(win) {
+  if (!app.isPackaged) return; // dev run — nothing to update
+
+  try {
+    autoUpdater = require("electron-updater").autoUpdater;
+  } catch (err) {
+    console.warn("[updater] electron-updater not available:", err.message);
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  const push = (state) => {
+    latestUpdateState = { ...latestUpdateState, ...state };
+    if (win && !win.isDestroyed()) {
+      win.webContents.send("protopilot:update-state", latestUpdateState);
+    }
+  };
+
+  autoUpdater.on("checking-for-update", () => push({ status: "checking", error: null }));
+  autoUpdater.on("update-available", (info) => push({ status: "downloading", version: info?.version || null }));
+  autoUpdater.on("update-not-available", () => push({ status: "idle" }));
+  autoUpdater.on("download-progress", (p) =>
+    push({ status: "downloading", percent: Math.round(p?.percent || 0) })
+  );
+  autoUpdater.on("update-downloaded", (info) =>
+    push({ status: "ready", version: info?.version || null })
+  );
+  autoUpdater.on("error", (err) =>
+    // A failed update check must never break the app — just log + report.
+    push({ status: "error", error: (err && err.message) || String(err) })
+  );
+
+  // Fire the first check a few seconds after launch so it doesn't compete
+  // with window/render startup, then re-check hourly for long sessions.
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 4000);
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 60 * 1000);
+}
+
+// Renderer asks for the current state (on mount) and can trigger the install.
+ipcMain.handle("protopilot:get-update-state", () => latestUpdateState);
+ipcMain.handle("protopilot:install-update", () => {
+  if (autoUpdater && latestUpdateState.status === "ready") {
+    // Restart into the freshly downloaded installer.
+    autoUpdater.quitAndInstall();
+    return true;
+  }
+  return false;
+});
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1360,
@@ -202,6 +279,8 @@ async function createWindow() {
   // port 5173) before launching Electron — see package.json.
 
   await win.loadURL(APP_URL);
+
+  setupAutoUpdater(win);
 
   return win;
 }

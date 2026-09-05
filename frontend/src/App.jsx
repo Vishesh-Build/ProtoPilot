@@ -10,6 +10,7 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import AIWorkforcePage from "./pages/AIWorkforcePage.jsx";
 import GenerationPipelinePage from "./pages/GenerationPipelinePage.jsx";
 import PrototypeViewerPage from "./pages/PrototypeViewerPage.jsx";
+import UpdateNotification from "./components/UpdateNotification.jsx";
 import { authApi, meetingsApi, API_BASE_URL } from "./lib/api.js";
 
 /* ============================================================
@@ -275,6 +276,7 @@ export default function App() {
     <>
       {persistentLiveCall}
       {currentPage}
+      <UpdateNotification />
     </>
   );
 }

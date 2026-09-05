@@ -10,13 +10,15 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k -n VITE,ELECTRON -c blue,green \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "vite build && electron-builder",
-    "electron:build:win": "vite build && electron-builder --win"
+    "electron:build:win": "vite build && electron-builder --win",
+    "release:win": "vite build && electron-builder --win --publish always"
   },
   "dependencies": {
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "livekit-client": "^2.5.0"
+    "livekit-client": "^2.5.0",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
@@ -32,6 +34,13 @@
     "productName": "ProtoPilot",
     "directories": { "output": "release" },
     "files": ["dist/**/*", "electron/**/*", "package.json"],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Vishesh-Build",
+        "repo": "ProtoPilot"
+      }
+    ],
     "win": { "target": "nsis", "icon": "build/icon.ico" },
     "mac": { "target": "dmg", "icon": "build/icon.icns" },
     "linux": { "target": "AppImage", "icon": "build/icon.png" },
