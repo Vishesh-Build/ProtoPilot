@@ -56,7 +56,14 @@ const APP_URL = `http://localhost:${APP_PORT}`;
    missing: without it an installed app could only ever talk to
    whatever URL was on the machine that ran the build.
    ------------------------------------------------------------ */
-const DEFAULT_API_BASE_URL = "http://localhost:8000";
+// Packaged apps talk to the live Render backend by default. A dev machine can
+// still override this with the PROTOPILOT_API_URL env var (see resolveApiBaseUrl
+// below) to point at a local backend. Without this, an installed .exe defaulted
+// to localhost:8000 — which only exists on a dev box — so every user saw
+// "Can't reach the server". The renderer reads THIS value (via preload), not the
+// vite-baked VITE_API_BASE_URL, so this is the one that actually matters for the
+// desktop app.
+const DEFAULT_API_BASE_URL = "https://protopilot-c60r.onrender.com";
 
 function configPath() {
   return path.join(app.getPath("userData"), "config.json");
@@ -80,7 +87,12 @@ function resolveApiBaseUrl() {
   if (fromEnv && /^https?:\/\//.test(fromEnv)) {
     return fromEnv.replace(/\/+$/, "");
   }
-  return readSavedApiBaseUrl() || DEFAULT_API_BASE_URL;
+  const saved = readSavedApiBaseUrl();
+  if (saved) return saved;
+  // Dev (unpackaged) talks to a local backend; a packaged/installed app talks
+  // to the live Render backend. This is what makes the shipped .exe work out of
+  // the box without every user configuring anything.
+  return app.isPackaged ? DEFAULT_API_BASE_URL : "http://localhost:8000";
 }
 
 function setApiBaseUrl(url) {
@@ -253,6 +265,27 @@ async function createWindow() {
   });
 
   win.setMenuBarVisibility(false);
+
+  // Microphone (and camera) permission. LiveKit calls getUserMedia under the
+  // hood when the meeting mic is enabled; in a packaged Electron build
+  // Chromium denies that request by default unless we approve it here, which
+  // is why live voice capture / transcription silently produced nothing.
+  // We only ever grant media (mic/camera) for our own app origin — every
+  // other permission, and any other origin, is denied.
+  const MEDIA_PERMISSIONS = new Set(["media", "audioCapture", "videoCapture"]);
+  const sess = win.webContents.session;
+  sess.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    const origin = details && details.requestingUrl;
+    const allowed =
+      MEDIA_PERMISSIONS.has(permission) &&
+      (!origin || isAllowedOrigin(origin));
+    callback(allowed);
+  });
+  sess.setPermissionCheckHandler((_wc, permission, origin) => {
+    return (
+      MEDIA_PERMISSIONS.has(permission) && (!origin || isAllowedOrigin(origin))
+    );
+  });
 
   win.webContents.on("will-navigate", (event, url) => {
     if (!isAllowedOrigin(url)) {
