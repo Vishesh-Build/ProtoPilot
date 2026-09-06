@@ -20,7 +20,13 @@ python-dotenv==1.0.1
 anyio==4.14.1
 
 # ---- Transcription (local Whisper; only used when ASR_PROVIDER != sarvam) ----
+# NOTE: faster-whisper imports `requests` at import time. The module is loaded
+# even in Sarvam mode (transcription_bot imports asr -> whisper_service at the
+# top level), so `requests` must be installed or the transcription bot crashes
+# on start with ModuleNotFoundError. It happened to be present locally as a
+# transitive dep; a clean Render install did not have it. Pin it explicitly.
 faster-whisper==1.0.2
+requests==2.32.3
 numpy==2.4.6
 scipy==1.17.1
 sounddevice==0.5.5
