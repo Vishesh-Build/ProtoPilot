@@ -1,29 +1,32 @@
 /* ============================================================
-   ProtoPilot marketing site — global styles
+   ProtoPilot marketing site — global styles (DARK / aurora)
 
-   Fresh landing-page look (NOT a copy of the in-app UI), but it
-   reuses the product's brand tokens so the site and the app read
-   as one family:
-     indigo   #4A63E8   (primary accent / links / gradients)
-     mint      #00E6A8   (secondary accent / "live" dot)
-     ink       #0F1016   (headings)
-     paper     #FAFBFD   (page background)
-   Space Grotesk for display headings, Inter for everything else.
+   Inspiration: Google Stitch — near-black canvas, a flowing
+   purple→blue→cyan aurora bleeding in from the edges, subtle
+   dotted grid, huge Space-Grotesk display type, glassy cards.
+   Brand accents kept from the product:
+     indigo #4A63E8 · mint #00E6A8 · violet #8B5CF6
    ============================================================ */
 
 :root {
   --indigo: #4a63e8;
-  --indigo-deep: #3a4fd0;
+  --violet: #8b5cf6;
   --mint: #00e6a8;
-  --mint-deep: #00c88a;
-  --ink: #0f1016;
-  --body: #3a3c46;
-  --muted: #767a8c;
-  --paper: #fafbfd;
-  --line: rgba(20, 21, 27, 0.08);
-  --card: #ffffff;
-  --radius: 18px;
-  --max: 1160px;
+  --cyan: #38bdf8;
+
+  --bg: #050509;
+  --bg-soft: #0b0b12;
+  --card: rgba(255, 255, 255, 0.03);
+  --card-hover: rgba(255, 255, 255, 0.05);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-soft: rgba(255, 255, 255, 0.06);
+
+  --text: #f4f5fa;
+  --muted: #9ea2b8;
+  --dim: #6b6f85;
+
+  --radius: 20px;
+  --max: 1200px;
 }
 
 * {
@@ -36,14 +39,15 @@ html,
 body {
   margin: 0;
   padding: 0;
+  background: var(--bg);
 }
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: var(--paper);
-  color: var(--body);
+  color: var(--text);
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow-x: hidden;
 }
 a {
   color: inherit;
@@ -54,14 +58,25 @@ img {
   max-width: 100%;
 }
 ::selection {
-  background: rgba(74, 99, 232, 0.18);
+  background: rgba(139, 92, 246, 0.4);
+}
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #050509;
+}
+::-webkit-scrollbar-thumb {
+  background: #23232f;
+  border-radius: 8px;
 }
 
 .display {
   font-family: "Space Grotesk", "Inter", sans-serif;
+  letter-spacing: -0.03em;
 }
 
-/* shared layout helpers */
+/* layout helpers */
 .container {
   width: 100%;
   max-width: var(--max);
@@ -69,43 +84,58 @@ img {
   padding: 0 28px;
 }
 .section {
-  padding: 110px 0;
+  position: relative;
+  padding: 130px 0;
 }
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--indigo);
-  background: rgba(74, 99, 232, 0.08);
-  border: 1px solid rgba(74, 99, 232, 0.16);
-  padding: 6px 14px;
+  color: #c9cde6;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  padding: 7px 15px;
   border-radius: 999px;
+  backdrop-filter: blur(8px);
 }
+
 .section-title {
   font-family: "Space Grotesk", "Inter", sans-serif;
-  font-size: 42px;
-  font-weight: 700;
-  line-height: 1.08;
+  font-size: 54px;
+  font-weight: 500;
+  line-height: 1.04;
   letter-spacing: -0.03em;
-  color: var(--ink);
-  margin: 20px 0 0;
+  color: var(--text);
+  margin: 22px 0 0;
 }
 .section-sub {
-  font-size: 17px;
-  line-height: 1.6;
+  font-size: 18px;
+  line-height: 1.65;
   color: var(--muted);
-  margin: 16px 0 0;
-  max-width: 560px;
+  margin: 18px 0 0;
+  max-width: 580px;
 }
+
 .grad-text {
-  background: linear-gradient(120deg, var(--indigo), var(--mint-deep));
+  background: linear-gradient(110deg, #a5b4ff 0%, #8b5cf6 45%, #38bdf8 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+/* aurora blob — reused across sections */
+.aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* buttons */
@@ -114,56 +144,56 @@ img {
   align-items: center;
   gap: 9px;
   font-family: "Inter", sans-serif;
-  font-weight: 700;
-  font-size: 14.5px;
+  font-weight: 600;
+  font-size: 15px;
   border-radius: 999px;
   cursor: pointer;
   border: none;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease,
+    opacity 0.18s ease;
   white-space: nowrap;
 }
 .btn-primary {
-  padding: 15px 26px;
+  padding: 15px 28px;
   color: #fff;
-  background: linear-gradient(135deg, var(--indigo), var(--indigo-deep));
-  box-shadow: 0 12px 28px rgba(74, 99, 232, 0.32);
+  background: linear-gradient(135deg, #6d5cf0, #4a63e8);
+  box-shadow: 0 10px 34px rgba(109, 92, 240, 0.5);
 }
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(74, 99, 232, 0.42);
+  box-shadow: 0 16px 44px rgba(109, 92, 240, 0.65);
 }
-.btn-dark {
-  padding: 15px 26px;
-  color: #fff;
-  background: linear-gradient(135deg, #14151b, #2a2c3a);
-  box-shadow: 0 10px 24px rgba(20, 21, 27, 0.22);
+.btn-light {
+  padding: 13px 24px;
+  color: #0b0b12;
+  background: #f4f5fa;
 }
-.btn-dark:hover {
+.btn-light:hover {
   transform: translateY(-2px);
-  box-shadow: 0 14px 30px rgba(20, 21, 27, 0.32);
+  background: #fff;
 }
 .btn-ghost {
-  padding: 13px 20px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.7);
+  padding: 14px 24px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
   backdrop-filter: blur(10px);
 }
 .btn-ghost:hover {
   transform: translateY(-2px);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.09);
 }
 .btn-sm {
   padding: 10px 18px;
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 /* reveal-on-scroll */
 .reveal {
   opacity: 0;
-  transform: translateY(24px);
-  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(26px);
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .reveal.in {
   opacity: 1;
@@ -172,10 +202,10 @@ img {
 
 @media (max-width: 860px) {
   .section {
-    padding: 72px 0;
+    padding: 84px 0;
   }
   .section-title {
-    font-size: 32px;
+    font-size: 36px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
