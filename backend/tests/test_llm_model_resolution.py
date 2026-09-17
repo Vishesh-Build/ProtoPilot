@@ -656,5 +656,59 @@ class NetworkErrorMessageTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(message.rstrip(), "network error:", "must not end on a void")
 
 
+class ModelCapacityFallbackTest(unittest.IsolatedAsyncioTestCase):
+    MESSAGES = [{"role": "user", "content": "build prototype"}]
+
+    async def test_http_413_retries_with_next_candidate(self):
+        class _FakeResponse:
+            def __init__(self, status_code, text="", data=None):
+                self.status_code = status_code
+                self.text = text
+                self._data = data or {}
+                self.headers = {}
+
+            def json(self):
+                return self._data
+
+        call_models = []
+
+        class _FakeAsyncClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc_info):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                model = json.get("model")
+                call_models.append(model)
+                if model == "openai/gpt-oss-120b":
+                    return _FakeResponse(
+                        413,
+                        '{"error":{"message":"Request too large for model \'openai/gpt-oss-120b\' on tokens per minute (TPM): Limit 8000, Requested 9002"}}',
+                    )
+                return _FakeResponse(
+                    200,
+                    data={"choices": [{"message": {"content": "<html>ok</html>"}}]},
+                )
+
+        provider = OpenAICompatibleProvider(
+            base_url="https://api.groq.com/openai/v1",
+            api_key="test-key",
+            models=["openai/gpt-oss-120b", "llama-3.3-70b-versatile"],
+            timeout=10.0,
+        )
+
+        with mock.patch.object(provider_base.httpx, "AsyncClient", _FakeAsyncClient):
+            result = await provider.chat(self.MESSAGES, 1000, 0.0)
+
+        self.assertEqual(result.text, "<html>ok</html>")
+        self.assertEqual(call_models, ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"])
+        self.assertEqual(provider.model, "llama-3.3-70b-versatile")
+
+
 if __name__ == "__main__":
     unittest.main()

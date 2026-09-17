@@ -95,7 +95,7 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         ),
     ),
     "prototype": AgentDefinition(
-        id="prototype", name="Prototype Builder", depends_on=["ui", "api", "database"], max_tokens=4000,
+        id="prototype", name="Prototype Builder", depends_on=["ui", "api", "database"], max_tokens=3000,
         system_prompt=(
             "You are the Prototype Builder agent. Given the interface screens, API "
             "endpoints, and database schema, generate ONE complete, self-contained HTML "

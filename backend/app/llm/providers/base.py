@@ -54,6 +54,7 @@ class ProviderError(Exception):
         message: str,
         *,
         model_gone: bool = False,
+        model_capacity_exceeded: bool = False,
         model: str | None = None,
         rate_limited: bool = False,
         retry_after: float | None = None,
@@ -61,6 +62,7 @@ class ProviderError(Exception):
     ):
         self.provider = provider
         self.message = message
+        self.model_capacity_exceeded = model_capacity_exceeded
         # True only for HTTP 429. Like model_gone, this is emphatically NOT an
         # outage: the provider is healthy and is asking us to slow down. Nine
         # agents fire at once, so hitting a free tier's per-minute ceiling is
@@ -196,6 +198,20 @@ def looks_like_model_error(status_code: int, body: str) -> bool:
         low = body.lower()
         return any(hint in low for hint in _MODEL_GONE_HINTS)
     return False
+
+
+def looks_like_model_capacity_error(status_code: int, body: str) -> bool:
+    if status_code == 413:
+        return True
+    low = body.lower()
+    return any(hint in low for hint in (
+        "request too large",
+        "tokens per minute",
+        "tpm limit",
+        "context length exceeded",
+        "maximum context length",
+        "token limit",
+    ))
 
 
 # 5xx that mean "up but momentarily unable" rather than "model gone" or "bad
@@ -383,6 +399,19 @@ class OpenAICompatibleProvider:
         try:
             return await self._post_chat(messages, max_tokens, temperature)
         except ProviderError as first_error:
+            if first_error.model_capacity_exceeded:
+                failed_model = first_error.model or self.model
+                self._dead_models.add(failed_model)
+                remaining = [c for c in self.candidates if c not in self._dead_models and c != failed_model]
+                if remaining:
+                    replacement = remaining[0]
+                    self.model = replacement
+                    logger.warning(
+                        "%s: model %r hit capacity/TPM limit (%s) — retrying with candidate %r",
+                        self.name, failed_model, first_error.message, replacement,
+                    )
+                    return await self._post_chat(messages, max_tokens, temperature)
+
             if not first_error.model_gone:
                 raise
             # The id that actually failed, not whatever self.model says now —
@@ -440,10 +469,12 @@ class OpenAICompatibleProvider:
                 retry_after=retry_after,
             )
         if resp.status_code >= 400:
+            is_cap = looks_like_model_capacity_error(resp.status_code, resp.text)
             raise ProviderError(
                 self.name,
                 f"HTTP {resp.status_code} for model {model!r}: {resp.text[:200]}",
                 model_gone=looks_like_model_error(resp.status_code, resp.text),
+                model_capacity_exceeded=is_cap,
                 transient=is_transient_status(resp.status_code),
                 model=model,
             )

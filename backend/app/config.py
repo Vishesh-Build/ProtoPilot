@@ -61,9 +61,10 @@ class Settings(BaseSettings):
     # as the fast, higher-throughput fallback — a 429 on 120b is transient, so
     # the router simply moves on, and NIM serves gpt-oss-20b as well.
     groq_models: str = (
+        "llama-3.3-70b-versatile,"
+        "llama-3.1-8b-instant,"
         "openai/gpt-oss-120b,"
-        "openai/gpt-oss-20b,"
-        "llama-3.3-70b-versatile"
+        "openai/gpt-oss-20b"
     )
 
     # ---- Google Gemini (optional, but the best free budget available) ----
@@ -109,7 +110,7 @@ class Settings(BaseSettings):
     # outside. This is a ceiling and not a spend, so the headroom is free.
     llm_default_max_tokens: int = 2048
     llm_default_temperature: float = 0.3
-    llm_request_timeout_seconds: float = 30.0
+    llm_request_timeout_seconds: float = 60.0
     provider_cooldown_seconds: float = 60.0
     llm_mock_mode: bool = False
 

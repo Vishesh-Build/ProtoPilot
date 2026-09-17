@@ -61,7 +61,14 @@ def _build_context(agent_id: str, states: dict[str, AgentState], requirements_bl
     for dep_id in definition.depends_on:
         dep_state = states[dep_id]
         dep_name = AGENT_DEFINITIONS[dep_id].name
-        parts.append(f"--- Output from {dep_name} ---\n{dep_state.output or '(no output)'}")
+        output = dep_state.output or "(no output)"
+        if agent_id == "prototype":
+            # Keep prompt compact so total tokens (prompt + max_tokens) stay safely below 5,500 tokens
+            # (comfortably beneath Groq's 8,000 TPM limit). The prototype needs UI screens first and foremost.
+            max_chars = 3500 if dep_id == "ui" else 2000
+            if len(output) > max_chars:
+                output = output[:max_chars] + "\n...(truncated for prototype build)"
+        parts.append(f"--- Output from {dep_name} ---\n{output}")
 
     return "\n\n".join(parts)
 

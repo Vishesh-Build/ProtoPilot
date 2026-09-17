@@ -130,6 +130,11 @@ class LLMRouter:
         not get better by asking again immediately.
         """
         retries = 0
+        total_delay = 0.0
+        is_generation = max_rate_limit_wait > self._RATE_LIMIT_MAX_WAIT
+        backoff_schedule = (2.0, 4.0, 8.0, 12.0) if is_generation else self._RATE_LIMIT_BACKOFF
+        max_retries = 4 if is_generation else self._RATE_LIMIT_MAX_RETRIES
+
         while True:
             try:
                 return await provider.chat(messages, max_tokens, temperature)
@@ -140,16 +145,16 @@ class LLMRouter:
                 # asking again right now.
                 if not (e.rate_limited or e.transient):
                     raise
-                if retries >= self._RATE_LIMIT_MAX_RETRIES:
+                if retries >= max_retries:
                     # Last attempt was already made; let the caller see the
                     # flag and move on to the next provider.
                     raise
                 delay = e.retry_after
                 if delay is None:
                     # A 429 with no Retry-After, or a 5xx (which rarely carries
-                    # one) — fall back to the router's own short backoff.
-                    delay = self._RATE_LIMIT_BACKOFF[
-                        min(retries, len(self._RATE_LIMIT_BACKOFF) - 1)
+                    # one) — fall back to the router's backoff.
+                    delay = backoff_schedule[
+                        min(retries, len(backoff_schedule) - 1)
                     ]
                 elif delay > max_rate_limit_wait:
                     logger.warning(
@@ -157,6 +162,15 @@ class LLMRouter:
                         "moving on without retrying or cooling down", provider.name, delay, max_rate_limit_wait,
                     )
                     raise
+
+                if total_delay + delay > max_rate_limit_wait:
+                    logger.warning(
+                        "%s cumulative wait would exceed %.0fs ceiling, moving on",
+                        provider.name, max_rate_limit_wait,
+                    )
+                    raise
+                total_delay += delay
+
                 logger.info(
                     "%s %s — retrying in %.1fs (%s)",
                     provider.name,
