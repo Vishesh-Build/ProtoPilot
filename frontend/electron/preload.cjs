@@ -39,4 +39,12 @@ contextBridge.exposeInMainWorld("protopilotDesktop", {
     // Return an unsubscribe fn so React effects can clean up.
     return () => ipcRenderer.removeListener("protopilot:update-state", listener);
   },
+  // --- Screen-share source picker ---
+  // Returns [{ id, name, thumbnail, appIcon }] for every screen + window so
+  // the renderer can show its own Zoom-style picker, then capture the chosen
+  // source via getUserMedia({ chromeMediaSourceId }). getDisplayMedia's native
+  // picker is bypassed entirely.
+  getScreenSources: () => ipcRenderer.invoke("protopilot:get-screen-sources"),
+  // --- Native Clipboard ---
+  writeClipboard: (text) => ipcRenderer.invoke("protopilot:write-clipboard", text),
 });

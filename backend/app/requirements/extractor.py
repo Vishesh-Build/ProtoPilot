@@ -11,6 +11,7 @@ was built around.
 import asyncio
 import json
 import logging
+import re
 
 from app.config import settings
 from app.llm.router import llm_router
@@ -26,13 +27,26 @@ _locks: dict[str, asyncio.Lock] = {}
 # Upper bound on the retry backlog if the LLM provider stays unavailable.
 _MAX_PENDING_LINES = 80
 
-# Below both of these, the pending text is too short to hold a requirement
-# (fillers like "हाँ।", "है।", "ok", "yes, right"). We skip the LLM call for
-# these — it only ever returned [] — which stops them clogging the extraction
-# lock. Deliberately generous so a genuinely terse requirement is never lost;
-# such lines also stay eligible because we keep extracting as more arrive.
-_MIN_EXTRACTION_CHARS = 25
-_MIN_EXTRACTION_WORDS = 5
+# Conversational fillers across English, Hindi, and Gujarati that carry no
+# requirement information on their own. When pending lines consist entirely of
+# these, we skip the LLM call to save tokens and avoid lock congestion.
+# Genuinely terse requirements (e.g. "We need a dashboard", "Add a report screen",
+# "મને લોગિન જોઈએ", "payment chahiye", "pehli baat") are NEVER skipped.
+_PURE_FILLER_WORDS = {
+    "ok", "okay", "yes", "yeah", "yep", "no", "nah", "hmm", "hmmm", "right",
+    "sure", "alright", "uh", "um", "ah", "hi", "bye", "cool", "fine",
+    "haan", "han", "ha", "acha", "accha", "achha", "theek", "sahi", "ji",
+    "arre", "bolo", "namaste", "chalo", "bas", "toh", "hai",
+    "haa", "saru", "barabar", "kemcho"
+}
+
+
+def _is_pure_filler(text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s]", " ", (text or "").lower()).strip()
+    words = cleaned.split()
+    if not words:
+        return True
+    return all(w in _PURE_FILLER_WORDS for w in words)
 
 SYSTEM_PROMPT = """You extract software requirements from a client meeting transcript.
 
@@ -123,17 +137,17 @@ async def extract_new_requirements(session: MeetingSession) -> list[dict]:
         if not new_lines:
             return []
 
-        # Content gate: tiny utterances ("हाँ।", "है।", "ok", "yes") carry no
+        # Content gate: tiny utterances ("हाँ।", "theek hai", "ok", "yes") carry no
         # requirement, yet each one used to fire a full LLM round-trip that
         # returned []. Individually cheap, but they queue on the lock above and,
         # once speech arrives faster than the model answers, the backlog is what
         # made extraction climb from ~19s to ~59s. If the combined new text is
-        # still too short to plausibly hold a requirement, leave the lines
-        # PENDING (don't mark them) and skip the call — they accumulate with the
-        # next utterances and get sent once there's enough to be worth a round
-        # trip. Nothing is lost; a real requirement always spans more words.
+        # purely conversational filler noise, leave the lines PENDING (don't mark them)
+        # and skip the call — they accumulate with the next utterances and get sent
+        # once real speech arrives. Real requirements (even terse ones like
+        # "We need a dashboard") are never skipped.
         combined = " ".join(line.display_text().strip() for line in new_lines).strip()
-        if len(combined) < _MIN_EXTRACTION_CHARS and len(combined.split()) < _MIN_EXTRACTION_WORDS:
+        if _is_pure_filler(combined):
             return []
 
         # Snapshot the exact ids we're about to send. Anything appended

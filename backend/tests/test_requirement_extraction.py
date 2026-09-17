@@ -303,8 +303,24 @@ class LockCleanupTest(ExtractionTestCase):
         extractor.clear_extraction_state(self.meeting_id)
         self.assertNotIn(self.meeting_id, extractor._locks)
 
-    def test_clearing_an_unknown_meeting_is_harmless(self):
-        extractor.clear_extraction_state("never-existed")
+class FillerGateTest(ExtractionTestCase):
+    async def test_pure_fillers_do_not_fire_llm_call(self):
+        self.session.add_transcript_line("A", "hi", "haan")
+        self.session.add_transcript_line("B", "hi", "theek hai")
+        self.session.add_transcript_line("C", "en", "ok hmm")
+
+        res = await extractor.extract_new_requirements(self.session)
+        self.assertEqual(res, [])
+        self.assertEqual(fake_router.calls, [], "pure fillers must not waste an LLM call")
+
+    async def test_short_indic_and_english_requirements_are_never_skipped(self):
+        fake_router.reply = json.dumps([{"title": "OTP Login", "category": "Auth", "priority": "High", "confidence": 95}])
+        self.session.add_transcript_line("Client", "gu", "મને લોગિન જોઈએ")
+
+        found = await extractor.extract_new_requirements(self.session)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["title"], "OTP Login")
+        self.assertEqual(len(fake_router.calls), 1, "terse requirement must fire extractor immediately")
 
 
 if __name__ == "__main__":

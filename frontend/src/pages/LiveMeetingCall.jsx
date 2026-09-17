@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   Copy, PhoneOff, X, Check, Zap, Settings, Smile, Send, Sparkles, Loader2, AlertCircle,
-  Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock,
+  Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock, Maximize, Minimize, Volume2,
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { meetingsApi, ApiError } from "../lib/api.js";
+import { copyTextToClipboard } from "../lib/clipboard.js";
 
 /* ============================================================
    ProtoPilot — Live Meeting Call
@@ -366,6 +367,118 @@ const styles = `
   }
   .lmc-add-point-btn:hover:not(:disabled) { background: #3A52D8; transform: scale(1.06); }
   .lmc-add-point-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ---- Device settings popover (opens from the caption gear) ---- */
+  .lmc-device-menu {
+    position: absolute; right: 12px; bottom: 54px; z-index: 6;
+    width: 300px; padding: 14px;
+    background: rgba(18,20,28,0.96); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 14px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+    animation: lmcFadeUp 0.18s ease both;
+  }
+  .lmc-device-menu-title {
+    font-size: 11px; font-weight: 700; color: #F4F4F6; letter-spacing: 0.02em;
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+  }
+  .lmc-device-group { margin-bottom: 11px; }
+  .lmc-device-group:last-child { margin-bottom: 0; }
+  .lmc-device-label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; font-weight: 600; color: #9CA0B4; margin-bottom: 5px;
+  }
+  .lmc-device-select {
+    width: 100%; box-sizing: border-box;
+    background: rgba(255,255,255,0.07); color: #F4F4F6;
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 8px;
+    padding: 7px 9px; font-size: 11.5px; font-family: inherit;
+    outline: none; cursor: pointer;
+  }
+  .lmc-device-select:focus { border-color: rgba(0,230,168,0.7); }
+  .lmc-device-select option { background: #1A1C24; color: #F4F4F6; }
+  .lmc-device-close { color: #9CA0B4; cursor: pointer; }
+  .lmc-device-close:hover { color: #fff; }
+
+  /* ---- Screen-source picker modal (Zoom-style) ---- */
+  .lmc-screen-modal {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(6,8,14,0.62); backdrop-filter: blur(6px);
+    animation: lmcFadeUp 0.2s ease both;
+  }
+  .lmc-screen-panel {
+    width: min(760px, 92vw); max-height: 82vh; overflow-y: auto;
+    background: #14151B; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 18px; padding: 20px 22px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+  }
+  .lmc-screen-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .lmc-screen-title { font-size: 15px; font-weight: 800; color: #F4F4F6; }
+  .lmc-screen-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  }
+  .lmc-screen-src {
+    border: 1.5px solid rgba(255,255,255,0.1); border-radius: 12px; overflow: hidden;
+    cursor: pointer; background: #0C0D12; transition: all 0.15s ease;
+  }
+  .lmc-screen-src:hover { border-color: #00E6A8; transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,230,168,0.18); }
+  .lmc-screen-thumb { width: 100%; height: 104px; object-fit: cover; background: #05060A; display: block; }
+  .lmc-screen-name {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #D6D8E2; font-weight: 500;
+    padding: 8px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .lmc-screen-name img { width: 15px; height: 15px; flex-shrink: 0; }
+  .lmc-screen-empty { color: #9CA0B4; font-size: 12.5px; text-align: center; padding: 40px 0; }
+
+  /* ---- Faces-only full-screen mode ---- */
+  .lmc-faces {
+    position: fixed; inset: 0; z-index: 30;
+    background: radial-gradient(1000px 600px at 50% 0%, #10151F 0%, #05060A 70%);
+    display: flex; flex-direction: column; padding: 24px;
+    animation: lmcFadeUp 0.25s ease both;
+  }
+  .lmc-faces-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-shrink: 0; }
+  .lmc-faces-title { display: flex; align-items: center; gap: 9px; color: #F4F4F6; font-size: 14px; font-weight: 700; }
+  .lmc-faces-grid {
+    flex: 1; min-height: 0; display: grid; gap: 14px; align-content: center;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .lmc-face-tile {
+    position: relative; border-radius: 16px; overflow: hidden;
+    background: linear-gradient(160deg, #2A3040, #12141C);
+    aspect-ratio: 16 / 10; min-height: 0;
+    border: 1.5px solid rgba(255,255,255,0.06);
+  }
+  .lmc-face-tile.speaking { border-color: #00E6A8; box-shadow: 0 0 0 2px rgba(0,230,168,0.5); }
+  .lmc-face-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .lmc-face-avatar {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 44px; font-weight: 800; color: #6B7488;
+  }
+  .lmc-face-name {
+    position: absolute; left: 12px; bottom: 10px; z-index: 1;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; font-weight: 600; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+
+  /* ---- Per-participant volume (Discord-style) ---- */
+  .lmc-vol-row { display: flex; align-items: center; gap: 8px; margin-left: 40px; margin-top: -6px; }
+  .lmc-vol-slider {
+    flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
+    background: #E2E4EC; border-radius: 4px; outline: none; cursor: pointer;
+  }
+  .lmc-vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: #4A63E8; cursor: pointer; border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  .lmc-vol-slider::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%;
+    background: #4A63E8; cursor: pointer; border: 2px solid #fff;
+  }
+  .lmc-vol-val { font-size: 10px; color: #9A9EB0; font-variant-numeric: tabular-nums; width: 30px; text-align: right; flex-shrink: 0; }
 `;
 
 /* ---------------- small helper components ---------------- */
@@ -390,6 +503,39 @@ function TrackMedia({ track, muted = false, className }) {
   ) : (
     <video ref={ref} autoPlay playsInline muted={muted} className={className} />
   );
+}
+
+/**
+ * Remote participant audio. Unlike TrackMedia this also applies a per-listener
+ * volume (Discord-style, via RemoteAudioTrack.setVolume) and routes playback to
+ * the chosen speaker device (via HTMLMediaElement.setSinkId). Both are local to
+ * this client — changing them never affects what anyone else hears.
+ */
+function RemoteAudio({ track, volume = 1, sinkId }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!track || !el) return undefined;
+    track.attach(el);
+    return () => track.detach(el);
+  }, [track]);
+
+  // LiveKit's own gain node — the reliable way to scale a remote track's volume.
+  useEffect(() => {
+    if (track && typeof track.setVolume === "function") track.setVolume(volume);
+  }, [track, volume]);
+
+  // Route to the selected speaker/output device when the browser supports it.
+  useEffect(() => {
+    const el = ref.current;
+    if (el && sinkId && typeof el.setSinkId === "function") {
+      el.setSinkId(sinkId).catch(() => {});
+    }
+  }, [sinkId]);
+
+  if (!track) return null;
+  return <audio ref={ref} autoPlay />;
 }
 
 function formatElapsed(startedAt) {
@@ -438,6 +584,27 @@ export default function LiveMeetingCall({
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(false);
   const [screenShareOn, setScreenShareOn] = useState(false);
+
+  // Device selection (Zoom/Discord-style). Enumerated once we have mic
+  // permission; the chosen deviceId is passed to LiveKit when a track starts
+  // and to setSinkId for the speaker (audio output).
+  const [devices, setDevices] = useState({ mics: [], speakers: [], cameras: [] });
+  const [selectedMic, setSelectedMic] = useState("");
+  const [selectedSpeaker, setSelectedSpeaker] = useState("");
+  const [selectedCamera, setSelectedCamera] = useState("");
+  const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
+
+  // Full-screen "faces only" mode — hides the whole card chrome (points,
+  // participants panel, nav) and shows just the joined people's video tiles.
+  const [facesOnly, setFacesOnly] = useState(false);
+
+  // Zoom-style screen picker: null = closed, otherwise the fetched source list.
+  const [screenSources, setScreenSources] = useState(null);
+  const [loadingSources, setLoadingSources] = useState(false);
+
+  // Discord-style per-participant volume, keyed by identity. 1 = 100%.
+  const [volumes, setVolumes] = useState({});
+  const audioElsRef = useRef({}); // identity -> <audio> element, for setSinkId
 
   // The caption is shown the moment Whisper returns, carrying the original
   // text. Its translation arrives separately as a transcript_update, so the
@@ -733,7 +900,10 @@ export default function LiveMeetingCall({
     const room = roomRef.current;
     if (!room) return;
     const next = !micOn;
-    await room.localParticipant.setMicrophoneEnabled(next);
+    await room.localParticipant.setMicrophoneEnabled(
+      next,
+      selectedMic ? { deviceId: selectedMic } : undefined,
+    );
     setMicOn(next);
     upsertParticipant(room.localParticipant.identity, { micOn: next });
   };
@@ -742,20 +912,135 @@ export default function LiveMeetingCall({
     const room = roomRef.current;
     if (!room) return;
     const next = !cameraOn;
-    await room.localParticipant.setCameraEnabled(next);
+    await room.localParticipant.setCameraEnabled(
+      next,
+      selectedCamera ? { deviceId: selectedCamera } : undefined,
+    );
     setCameraOn(next);
   };
 
-  const toggleScreenShare = async () => {
+  // Enumerate available mics/speakers/cameras. Labels are only populated once
+  // the user has granted mic permission, so this is called after connect() has
+  // enabled the mic — and again whenever a device is plugged/unplugged.
+  const refreshDevices = useCallback(async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const mics = all.filter((d) => d.kind === "audioinput");
+      const speakers = all.filter((d) => d.kind === "audiooutput");
+      const cameras = all.filter((d) => d.kind === "videoinput");
+      setDevices({ mics, speakers, cameras });
+      // Default each selection to the current/first device if not yet chosen.
+      setSelectedMic((cur) => cur || mics[0]?.deviceId || "");
+      setSelectedSpeaker((cur) => cur || speakers[0]?.deviceId || "");
+      setSelectedCamera((cur) => cur || cameras[0]?.deviceId || "");
+    } catch (err) {
+      console.warn("Couldn't enumerate media devices:", err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (connectionState !== "connected") return undefined;
+    refreshDevices();
+    const onChange = () => refreshDevices();
+    navigator.mediaDevices.addEventListener?.("devicechange", onChange);
+    return () => navigator.mediaDevices.removeEventListener?.("devicechange", onChange);
+  }, [connectionState, refreshDevices]);
+
+  // Switch the live mic to a newly-chosen device without dropping the call.
+  const changeMic = async (deviceId) => {
+    setSelectedMic(deviceId);
     const room = roomRef.current;
     if (!room) return;
     try {
-      const next = !screenShareOn;
-      await room.localParticipant.setScreenShareEnabled(next);
-      setScreenShareOn(next);
-      if (next) setPinnedIdentity(room.localParticipant.identity);
+      await room.switchActiveDevice("audioinput", deviceId);
+    } catch (err) {
+      console.warn("Couldn't switch microphone:", err.message);
+    }
+  };
+
+  // Speaker (audio output) is per-<audio>-element via setSinkId — applied in the
+  // RemoteAudio components below through the selectedSpeaker prop.
+  const changeSpeaker = (deviceId) => setSelectedSpeaker(deviceId);
+
+  const changeCamera = async (deviceId) => {
+    setSelectedCamera(deviceId);
+    const room = roomRef.current;
+    if (!room || !cameraOn) return;
+    try {
+      await room.switchActiveDevice("videoinput", deviceId);
+    } catch (err) {
+      console.warn("Couldn't switch camera:", err.message);
+    }
+  };
+
+  const setParticipantVolume = (identity, value) => {
+    setVolumes((prev) => ({ ...prev, [identity]: value }));
+  };
+
+  // Zoom-style screen share: fetch the source list from Electron, show our own
+  // picker, then publish the chosen source. Outside Electron (dev browser) fall
+  // back to the browser's native getDisplayMedia picker.
+  const toggleScreenShare = async () => {
+    const room = roomRef.current;
+    if (!room) return;
+
+    if (screenShareOn) {
+      await room.localParticipant.setScreenShareEnabled(false).catch(() => {});
+      setScreenShareOn(false);
+      return;
+    }
+
+    const desktop = window.protopilotDesktop;
+    if (desktop?.getScreenSources) {
+      setLoadingSources(true);
+      try {
+        const sources = await desktop.getScreenSources();
+        setScreenSources(sources || []);
+      } catch (err) {
+        console.warn("Couldn't list screen sources:", err.message);
+        setScreenSources([]);
+      } finally {
+        setLoadingSources(false);
+      }
+      return;
+    }
+
+    // Browser fallback (dev): native picker.
+    try {
+      await room.localParticipant.setScreenShareEnabled(true);
+      setScreenShareOn(true);
+      setPinnedIdentity(room.localParticipant.identity);
     } catch {
-      // user cancelled the OS screen-share picker — not an error to surface
+      // user cancelled — not an error to surface
+    }
+  };
+
+  // Called when the user picks a source in our Zoom-style modal.
+  const startScreenShareFromSource = async (sourceId) => {
+    const room = roomRef.current;
+    setScreenSources(null);
+    if (!room) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: "desktop",
+            chromeMediaSourceId: sourceId,
+          },
+        },
+      });
+      const [videoTrack] = stream.getVideoTracks();
+      await room.localParticipant.publishTrack(videoTrack, {
+        source: Track.Source.ScreenShare,
+      });
+      // When the user stops sharing from the OS, tear our state down too.
+      videoTrack.addEventListener("ended", () => setScreenShareOn(false));
+      setScreenShareOn(true);
+      setPinnedIdentity(room.localParticipant.identity);
+    } catch (err) {
+      console.warn("Couldn't start screen share:", err.message);
+      setScreenShareOn(false);
     }
   };
 
@@ -888,11 +1173,13 @@ export default function LiveMeetingCall({
             <div
               className="lmc-pill"
               style={{ cursor: "pointer" }}
-              onClick={() => {
+              onClick={async () => {
                 if (!meetingId) return;
-                navigator.clipboard?.writeText(meetingId);
-                setIdCopied(true);
-                setTimeout(() => setIdCopied(false), 1500);
+                const copied = await copyTextToClipboard(meetingId);
+                if (copied) {
+                  setIdCopied(true);
+                  setTimeout(() => setIdCopied(false), 1500);
+                }
               }}
               title="Copy meeting ID to share with others"
             >
@@ -966,10 +1253,18 @@ export default function LiveMeetingCall({
                   </>
                 )}
 
-                {/* Remote audio — always attached even when a different participant is pinned visually */}
+                {/* Remote audio — always attached even when a different participant is pinned
+                    visually. Per-participant volume + chosen speaker are applied here. */}
                 {participantList
                   .filter((p) => p.identity !== localIdentity && p.audioTrack)
-                  .map((p) => <TrackMedia key={`audio-${p.identity}`} track={p.audioTrack} />)}
+                  .map((p) => (
+                    <RemoteAudio
+                      key={`audio-${p.identity}`}
+                      track={p.audioTrack}
+                      volume={volumes[p.identity] ?? 1}
+                      sinkId={selectedSpeaker}
+                    />
+                  ))}
 
                 <div className="lmc-you-badge">
                   <span className="lmc-you-avatar">{(currentUser?.name || "Y")[0].toUpperCase()}</span>
@@ -990,10 +1285,53 @@ export default function LiveMeetingCall({
                   <div className={`lmc-ctrl-btn ${screenShareOn ? "active" : ""}`} onClick={toggleScreenShare} title="Share screen">
                     {screenShareOn ? <MonitorOff size={15} /> : <Monitor size={15} />}
                   </div>
+                  <div className="lmc-ctrl-btn" onClick={() => setDeviceMenuOpen((v) => !v)} title="Audio & video settings">
+                    <Settings size={15} />
+                  </div>
+                  <div className="lmc-ctrl-btn" onClick={() => setFacesOnly(true)} title="Full-screen — show only faces">
+                    <Maximize size={15} />
+                  </div>
                   <div className="lmc-ctrl-btn hangup" onClick={handleHangUp} title="Leave meeting">
                     <PhoneOff size={15} />
                   </div>
                 </div>
+
+                {/* ---- Device settings popover ---- */}
+                {deviceMenuOpen && (
+                  <div className="lmc-device-menu">
+                    <div className="lmc-device-menu-title">
+                      DEVICE SETTINGS
+                      <X size={14} className="lmc-device-close" onClick={() => setDeviceMenuOpen(false)} />
+                    </div>
+                    <div className="lmc-device-group">
+                      <div className="lmc-device-label"><Mic size={12} /> Microphone</div>
+                      <select className="lmc-device-select" value={selectedMic} onChange={(e) => changeMic(e.target.value)}>
+                        {devices.mics.length === 0 && <option value="">Default microphone</option>}
+                        {devices.mics.map((d, i) => (
+                          <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${i + 1}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="lmc-device-group">
+                      <div className="lmc-device-label"><Volume2 size={12} /> Speaker</div>
+                      <select className="lmc-device-select" value={selectedSpeaker} onChange={(e) => changeSpeaker(e.target.value)}>
+                        {devices.speakers.length === 0 && <option value="">Default speaker</option>}
+                        {devices.speakers.map((d, i) => (
+                          <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${i + 1}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="lmc-device-group">
+                      <div className="lmc-device-label"><Video size={12} /> Camera</div>
+                      <select className="lmc-device-select" value={selectedCamera} onChange={(e) => changeCamera(e.target.value)}>
+                        {devices.cameras.length === 0 && <option value="">Default camera</option>}
+                        {devices.cameras.map((d, i) => (
+                          <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 <div className="lmc-caption-bar">
                   <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 14, flexShrink: 0 }}>
@@ -1016,7 +1354,7 @@ export default function LiveMeetingCall({
                           : caption.text}
                     </div>
                   </div>
-                  <Settings size={15} className="lmc-caption-gear" />
+                  <Settings size={15} className="lmc-caption-gear" onClick={() => setDeviceMenuOpen((v) => !v)} />
                 </div>
               </div>
 
@@ -1199,15 +1537,36 @@ export default function LiveMeetingCall({
                     </div>
                   ))}
 
-                  {tab === "participants" && participantList.map((p) => (
-                    <div key={p.identity} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(160deg,#8FA8C9,#3E5470)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700 }}>
-                        {(p.isLocal ? currentUser?.name : p.name || "?")[0]?.toUpperCase()}
+                  {tab === "participants" && participantList.map((p) => {
+                    const vol = volumes[p.identity] ?? 1;
+                    return (
+                      <div key={p.identity} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(160deg,#8FA8C9,#3E5470)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700 }}>
+                            {(p.isLocal ? currentUser?.name : p.name || "?")[0]?.toUpperCase()}
+                          </div>
+                          <span style={{ fontSize: 12.5, color: "#24252C", fontWeight: 500 }}>{p.isLocal ? "You" : p.name}</span>
+                          {p.micOn ? <Mic size={12} color="#9A9EB0" style={{ marginLeft: "auto" }} /> : <MicOff size={12} color="#E14B4B" style={{ marginLeft: "auto" }} />}
+                        </div>
+                        {/* Per-participant volume (local to you) — not shown for yourself. */}
+                        {!p.isLocal && (
+                          <div className="lmc-vol-row">
+                            <Volume2 size={12} color="#9A9EB0" style={{ flexShrink: 0 }} />
+                            <input
+                              className="lmc-vol-slider"
+                              type="range"
+                              min="0"
+                              max="200"
+                              value={Math.round(vol * 100)}
+                              onChange={(e) => setParticipantVolume(p.identity, Number(e.target.value) / 100)}
+                              title="How loud this person sounds to you"
+                            />
+                            <span className="lmc-vol-val">{Math.round(vol * 100)}%</span>
+                          </div>
+                        )}
                       </div>
-                      <span style={{ fontSize: 12.5, color: "#24252C", fontWeight: 500 }}>{p.isLocal ? "You" : p.name}</span>
-                      {p.micOn ? <Mic size={12} color="#9A9EB0" style={{ marginLeft: "auto" }} /> : <MicOff size={12} color="#E14B4B" style={{ marginLeft: "auto" }} />}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -1230,6 +1589,79 @@ export default function LiveMeetingCall({
           </div>
         </div>
       </div>
+
+      {/* ---- Zoom-style screen-source picker ---- */}
+      {screenSources !== null && (
+        <div className="lmc-screen-modal" onClick={() => setScreenSources(null)}>
+          <div className="lmc-screen-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="lmc-screen-head">
+              <div className="lmc-screen-title">Choose what to share</div>
+              <div className="lmc-back-btn" onClick={() => setScreenSources(null)} style={{ background: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)", color: "#D6D8E2" }}>
+                <X size={16} />
+              </div>
+            </div>
+            {screenSources.length === 0 ? (
+              <div className="lmc-screen-empty">
+                {loadingSources ? "Finding your screens and windows…" : "No screens or windows available to share."}
+              </div>
+            ) : (
+              <div className="lmc-screen-grid">
+                {screenSources.map((src) => (
+                  <div key={src.id} className="lmc-screen-src" onClick={() => startScreenShareFromSource(src.id)} title={src.name}>
+                    {src.thumbnail ? (
+                      <img className="lmc-screen-thumb" src={src.thumbnail} alt={src.name} />
+                    ) : (
+                      <div className="lmc-screen-thumb" />
+                    )}
+                    <div className="lmc-screen-name">
+                      {src.appIcon && <img src={src.appIcon} alt="" />}
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{src.name}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ---- Faces-only full-screen mode ---- */}
+      {facesOnly && (
+        <div className="lmc-faces">
+          <div className="lmc-faces-head">
+            <div className="lmc-faces-title">
+              <Radio size={16} color="#00E6A8" /> {meetingTitle}
+              <span style={{ color: "#8A8FA3", fontWeight: 500, fontSize: 12 }}>· {elapsedText}</span>
+            </div>
+            <div className="lmc-ctrl-btn" onClick={() => setFacesOnly(false)} title="Exit full screen">
+              <Minimize size={15} />
+            </div>
+          </div>
+          <div className="lmc-faces-grid">
+            {participantList.map((p) => {
+              const faceTrack = p.screenTrack || p.videoTrack || null;
+              return (
+                <div key={p.identity} className={`lmc-face-tile ${p.speaking ? "speaking" : ""}`}>
+                  {faceTrack ? (
+                    <TrackMedia track={faceTrack} muted={p.isLocal} className="lmc-face-video" />
+                  ) : (
+                    <div className="lmc-face-avatar">
+                      {(p.isLocal ? currentUser?.name || "Y" : p.name || "?")[0]?.toUpperCase()}
+                    </div>
+                  )}
+                  <div className="lmc-face-name">
+                    {p.micOn ? <Mic size={12} /> : <MicOff size={12} color="#FF8A7A" />}
+                    {p.isLocal ? "You" : p.name}
+                  </div>
+                </div>
+              );
+            })}
+            {participantList.length === 0 && (
+              <div className="lmc-screen-empty">Waiting for others to join…</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

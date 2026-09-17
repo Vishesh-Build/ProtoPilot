@@ -188,6 +188,27 @@ img {
   font-size: 13.5px;
 }
 
+/* cursor-following glow — soft blob that trails the pointer */
+.cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 460px;
+  height: 460px;
+  margin: -230px 0 0 -230px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(
+    circle,
+    rgba(139, 92, 246, 0.16),
+    rgba(56, 189, 248, 0.08) 42%,
+    transparent 70%
+  );
+  filter: blur(30px);
+  will-change: transform;
+}
+
 /* reveal-on-scroll */
 .reveal {
   opacity: 0;

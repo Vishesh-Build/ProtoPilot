@@ -26,10 +26,18 @@
       like it's still ProtoPilot.
    ============================================================ */
 
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, desktopCapturer, clipboard } = require("electron");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
+
+ipcMain.handle("protopilot:write-clipboard", (_event, text) => {
+  if (typeof text === "string") {
+    clipboard.writeText(text);
+    return true;
+  }
+  return false;
+});
 // electron-updater is imported lazily inside setupAutoUpdater() so a dev run
 // (npm run electron:dev, app NOT packaged) never touches it — it only matters
 // for an installed NSIS build talking to GitHub Releases.
@@ -109,6 +117,30 @@ const API_BASE_URL = resolveApiBaseUrl();
 
 ipcMain.on("protopilot:get-api-base-url", (event) => {
   event.returnValue = API_BASE_URL;
+});
+
+/* ------------------------------------------------------------
+   Screen-share source picker (Zoom-style).
+
+   getDisplayMedia's built-in Electron picker is bare and can't be
+   styled, so instead the renderer asks us for the list of screens +
+   windows (with live thumbnails), shows its OWN picker, and then
+   captures the chosen source directly via getUserMedia's
+   chromeMediaSourceId. That's why this just returns the sources —
+   the actual capture happens in the renderer.
+   ------------------------------------------------------------ */
+ipcMain.handle("protopilot:get-screen-sources", async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen", "window"],
+    thumbnailSize: { width: 320, height: 200 },
+    fetchWindowIcons: true,
+  });
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    thumbnail: s.thumbnail?.toDataURL() || null,
+    appIcon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
+  }));
 });
 
 // Origins the app window is allowed to navigate to directly.

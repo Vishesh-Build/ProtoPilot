@@ -162,10 +162,11 @@
   width: 150%;
   height: 130%;
   background: radial-gradient(
-    circle at 50% 60%,
+    circle at 50% 55%,
     #060608 0%,
-    #060608 40%,
-    transparent 68%
+    rgba(6, 6, 8, 0.85) 30%,
+    rgba(6, 6, 8, 0.45) 52%,
+    transparent 72%
   );
   z-index: 2;
   pointer-events: none;
@@ -177,6 +178,7 @@
   height: 620px;
   background: radial-gradient(circle, rgba(139, 92, 246, 0.9), transparent 62%);
   opacity: 0.55;
+  animation: drift1 18s ease-in-out infinite;
 }
 .hero-aurora-2 {
   top: 20%;
@@ -185,6 +187,7 @@
   height: 640px;
   background: radial-gradient(circle, rgba(56, 189, 248, 0.75), transparent 62%);
   opacity: 0.5;
+  animation: drift2 22s ease-in-out infinite;
 }
 .hero-aurora-3 {
   top: 42%;
@@ -193,6 +196,23 @@
   height: 460px;
   background: radial-gradient(circle, rgba(74, 99, 232, 0.7), transparent 62%);
   opacity: 0.45;
+  animation: drift3 26s ease-in-out infinite;
+}
+
+/* slow flowing aurora — gives the background a living, breathing feel */
+@keyframes drift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(60px, 40px) scale(1.12); }
+  66% { transform: translate(-40px, 70px) scale(0.95); }
+}
+@keyframes drift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-70px, 50px) scale(0.92); }
+  66% { transform: translate(50px, -40px) scale(1.15); }
+}
+@keyframes drift3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(30px, -60px) scale(1.1); }
 }
 .hero-dots {
   position: absolute;
@@ -263,8 +283,23 @@
 }
 .prompt-placeholder {
   font-size: 17px;
-  color: var(--dim);
+  color: var(--text);
   padding: 6px 4px 40px;
+  min-height: 26px;
+}
+.prompt-caret {
+  display: inline-block;
+  width: 2px;
+  height: 19px;
+  margin-left: 2px;
+  vertical-align: -3px;
+  background: var(--violet);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.9);
+  animation: caret-blink 1s step-end infinite;
+}
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 .prompt-bar {
   display: flex;

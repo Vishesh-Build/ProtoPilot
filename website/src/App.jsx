@@ -20,6 +20,90 @@ import "./sections.css";
    and this page updates itself.
    ============================================================ */
 
+/* cursor-following aurora glow — a soft blob that trails the pointer */
+function CursorGlow() {
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(hover: none)").matches) return; // skip on touch
+    const el = document.createElement("div");
+    el.className = "cursor-glow";
+    document.body.appendChild(el);
+
+    let tx = window.innerWidth / 2;
+    let ty = window.innerHeight / 2;
+    let x = tx;
+    let y = ty;
+    let raf = 0;
+
+    const onMove = (e) => {
+      tx = e.clientX;
+      ty = e.clientY;
+    };
+    const tick = () => {
+      x += (tx - x) * 0.12;
+      y += (ty - y) * 0.12;
+      el.style.transform = `translate(${x}px, ${y}px)`;
+      raf = requestAnimationFrame(tick);
+    };
+    window.addEventListener("mousemove", onMove);
+    raf = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      cancelAnimationFrame(raf);
+      el.remove();
+    };
+  }, []);
+  return null;
+}
+
+/* auto-typing demo — types a prompt, pauses, deletes, moves to the next */
+const TYPE_PROMPTS = [
+  "Turn today's standup into a working prototype…",
+  "Draft the requirements from our client call…",
+  "Build the dashboard we just discussed…",
+  "Spin up the onboarding flow from the meeting…",
+];
+
+function useTypewriter(items, { type = 55, del = 28, hold = 1500 } = {}) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setText(items[0]);
+      return;
+    }
+    let i = 0;
+    let char = 0;
+    let deleting = false;
+    let timer;
+    const step = () => {
+      const full = items[i];
+      if (!deleting) {
+        char++;
+        setText(full.slice(0, char));
+        if (char === full.length) {
+          deleting = true;
+          timer = setTimeout(step, hold);
+          return;
+        }
+        timer = setTimeout(step, type);
+      } else {
+        char--;
+        setText(full.slice(0, char));
+        if (char === 0) {
+          deleting = false;
+          i = (i + 1) % items.length;
+          timer = setTimeout(step, 320);
+          return;
+        }
+        timer = setTimeout(step, del);
+      }
+    };
+    timer = setTimeout(step, 600);
+    return () => clearTimeout(timer);
+  }, [items]);
+  return text;
+}
+
 function useReveal() {
   useEffect(() => {
     const els = document.querySelectorAll(".reveal");
@@ -111,6 +195,7 @@ const CHIPS = [
 ];
 
 function Hero() {
+  const typed = useTypewriter(TYPE_PROMPTS);
   return (
     <header className="hero" id="top">
       <div className="hero-void" />
@@ -138,7 +223,8 @@ function Hero() {
         <div className="prompt-box reveal">
           <div className="prompt-line" />
           <div className="prompt-placeholder">
-            What shall we turn into a prototype today?
+            {typed}
+            <span className="prompt-caret" />
           </div>
           <div className="prompt-bar">
             <div className="prompt-tabs">
@@ -314,17 +400,17 @@ const FAQS = [
 ];
 
 function Faq() {
-  const [open, setOpen] = useState(0);
+  const [open, setOpen] = useState(-1);
   return (
     <section className="section faq" id="faq">
       <div className="container faq-inner">
         <h2 className="faq-title display reveal">Questions?</h2>
-        <div className="faq-list">
+        <div className="faq-list reveal">
           {FAQS.map((item, i) => {
             const isOpen = open === i;
             return (
               <div
-                className={`faq-item reveal ${isOpen ? "open" : ""}`}
+                className={`faq-item ${isOpen ? "open" : ""}`}
                 key={item.q}
                 onClick={() => setOpen(isOpen ? -1 : i)}
               >
@@ -399,6 +485,7 @@ export default function App() {
   useReveal();
   return (
     <>
+      <CursorGlow />
       <Nav />
       <Hero />
       <Features />
