@@ -219,6 +219,12 @@ export const meetingsApi = {
   // (free) replay of what's already there.
   generateSocketUrl: (meetingId, { force = false } = {}) =>
     `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}/generate${force ? "?force=1" : ""}`,
+
+  cancelGeneration: (meetingId) =>
+    request(`/meetings/${meetingId}/cancel-generation`, { method: "POST" }),
+
+  generationStatus: (meetingId) =>
+    request(`/meetings/${meetingId}/generation-status`),
 };
 
 export { ApiError };

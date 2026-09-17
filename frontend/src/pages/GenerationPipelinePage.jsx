@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Radio, Check, Loader2, Circle, ChevronRight, Terminal, Link2,
   LayoutDashboard, Users, Cpu, GitBranch, Eye,
-  Settings, Bell, Command, FileCode2, Boxes, Rocket, Clock, Package, AlertCircle,
+  Settings, Bell, Command, FileCode2, Boxes, Rocket, Clock, Package, AlertCircle, Square,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
 import { meetingsApi } from "../lib/api.js";
@@ -74,6 +74,14 @@ const styles = `
   .gp-nav-meta { display: flex; align-items: center; gap: 14px; font-size: 12px; color: #767A8C; flex-shrink: 0; }
   .gp-nav-pill { display: flex; align-items: center; gap: 6px; font-weight: 600; }
   .gp-dot { width: 6px; height: 6px; border-radius: 50%; background: #00C88A; box-shadow: 0 0 0 3px rgba(0,200,138,0.18); }
+  .gp-cancel-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #FFF0F0; color: #D32F2F; border: 1px solid #FFCDD2;
+    border-radius: 8px; padding: 5px 12px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .gp-cancel-btn:hover:not(:disabled) { background: #FFEBEE; border-color: #E57373; color: #B71C1C; }
+  .gp-cancel-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
   .gp-body { flex: 1; display: flex; min-height: 0; }
 
@@ -195,6 +203,19 @@ const styles = `
     display: flex; align-items: center; justify-content: center; color: #fff;
   }
 
+  .gp-cancel-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #FEE2E2; color: #DC2626; border: 1px solid #FCA5A5;
+    border-radius: 999px; padding: 4px 12px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .gp-cancel-btn:hover:not(:disabled) {
+    background: #DC2626; color: #fff; border-color: #DC2626;
+  }
+  .gp-cancel-btn:disabled {
+    opacity: 0.6; cursor: not-allowed;
+  }
+
   .gp-spin { animation: gpSpin 1s linear infinite; }
   @keyframes gpSpin { to { transform: rotate(360deg); } }
 `;
@@ -232,6 +253,8 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
   const [logs, setLogs] = useState({});
   const [pipelineError, setPipelineError] = useState(null);
   const [finished, setFinished] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   // View mode only: the meeting has no generated outputs yet, so there's
   // nothing to replay. Distinct from an in-progress run.
   const [viewEmpty, setViewEmpty] = useState(false);
@@ -241,100 +264,123 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
   // would otherwise claim "lost connection" after a clean finish.
   const finishedRef = useRef(false);
 
-  // What opening this page does depends on WHY it was opened:
-  //   • "view" — replay the already-built outputs over plain HTTP. The
-  //     generate socket is never opened (opening it is a server-side trigger),
-  //     so merely navigating in can never start or re-run a paid pipeline.
-  //   • "run"  — the host pressed Generate/Regenerate. Connecting this socket
-  //     with force=1 IS what starts the real backend pipeline
-  //     (app/ws/generate.py), re-running over the currently-approved
-  //     requirements (so a requirement approved after the last build is
-  //     picked up).
-  // Runs once per mount, not per render.
+  const handleCancelGeneration = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "cancel" }));
+      }
+      await meetingsApi.cancelGeneration(meetingId);
+      setIsCancelled(true);
+      finishedRef.current = true;
+      setFinished(true);
+      setPipelineError(null);
+    } catch (err) {
+      console.warn("Cancel generation error:", err);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   useEffect(() => {
     if (!meetingId) return undefined;
+    let cancelled = false;
 
-    if (intent !== "run") {
-      let cancelled = false;
-      meetingsApi.agentOutputs(meetingId)
-        .then((data) => {
-          if (cancelled) return;
-          const outs = data.agent_outputs || {};
-          if (Object.keys(outs).length === 0) {
-            setViewEmpty(true);
-            return;
-          }
-          setOutputs(outs);
-          setAgents(
-            Object.fromEntries(
-              Object.keys(outs).map((id) => [id, { status: "completed", progress: 100 }]),
-            ),
-          );
+    const connectSocket = (force = false) => {
+      if (!meetingId) return;
+      if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      const socket = new WebSocket(meetingsApi.generateSocketUrl(meetingId, { force }));
+      socketRef.current = socket;
+
+      socket.onmessage = (event) => {
+        let data;
+        try { data = JSON.parse(event.data); } catch { return; }
+
+        if (data.type === "agent_update") {
+          setAgents((prev) => ({ ...prev, [data.agent]: { status: data.status, progress: data.progress } }));
+        } else if (data.type === "agent_output") {
+          setOutputs((prev) => ({ ...prev, [data.agent]: data.output }));
+        } else if (data.type === "agent_log") {
+          const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          setLogs((prev) => {
+            const existing = prev[data.agent] || [];
+            return { ...prev, [data.agent]: [...existing, `[${stamp}] ${data.message}`] };
+          });
+        } else if (data.type === "pipeline_complete") {
           finishedRef.current = true;
           setFinished(true);
+        } else if (data.type === "pipeline_failed") {
+          finishedRef.current = true;
+          setFinished(true);
+          setPipelineError(data.message || "Generation finished with failures.");
+        } else if (data.type === "pipeline_cancelled") {
+          finishedRef.current = true;
+          setFinished(true);
+          setIsCancelled(true);
+          setPipelineError(null);
+        } else if (data.type === "error") {
+          setPipelineError(data.message);
+        }
+      };
+
+      socket.onerror = () => {
+        if (!finishedRef.current && !isCancelled) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+      };
+      socket.onclose = () => {
+        if (!finishedRef.current && !isCancelled) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+      };
+    };
+
+    if (intent === "run") {
+      connectSocket(true);
+    } else {
+      // intent === "view": Check if generation is actively running for this meeting!
+      meetingsApi.generationStatus(meetingId)
+        .then((status) => {
+          if (cancelled) return;
+          if (status && (status.running || status.is_running)) {
+            // Reconnect to the running pipeline and watch live!
+            connectSocket(false);
+          } else {
+            // Check for completed outputs
+            return meetingsApi.agentOutputs(meetingId).then((data) => {
+              if (cancelled) return;
+              const outs = data.agent_outputs || {};
+              if (Object.keys(outs).length === 0) {
+                setViewEmpty(true);
+                return;
+              }
+              setOutputs(outs);
+              setAgents(
+                Object.fromEntries(
+                  Object.keys(outs).map((id) => [id, { status: "completed", progress: 100 }]),
+                ),
+              );
+              finishedRef.current = true;
+              setFinished(true);
+            });
+          }
         })
-        .catch(() => { if (!cancelled) setViewEmpty(true); });
-      return () => { cancelled = true; };
+        .catch(() => {
+          if (!cancelled) setViewEmpty(true);
+        });
     }
 
-    const socket = new WebSocket(meetingsApi.generateSocketUrl(meetingId, { force: true }));
-    socketRef.current = socket;
-
-    socket.onmessage = (event) => {
-      let data;
-      try { data = JSON.parse(event.data); } catch { return; }
-
-      if (data.type === "agent_update") {
-        setAgents((prev) => ({ ...prev, [data.agent]: { status: data.status, progress: data.progress } }));
-      } else if (data.type === "agent_output") {
-        setOutputs((prev) => ({ ...prev, [data.agent]: data.output }));
-      } else if (data.type === "agent_log") {
-        const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        setLogs((prev) => {
-          const existing = prev[data.agent] || [];
-          return { ...prev, [data.agent]: [...existing, `[${stamp}] ${data.message}`] };
-        });
-      } else if (data.type === "pipeline_complete") {
-        finishedRef.current = true;
-        setFinished(true);
-      } else if (data.type === "pipeline_failed") {
-        // The run is OVER — an agent failed, and the backend says which. This
-        // must not produce "Prototype ready" below; the banner carries the
-        // truth instead.
-        finishedRef.current = true;
-        setFinished(true);
-        setPipelineError(data.message || "Generation finished with failures.");
-      } else if (data.type === "error") {
-        setPipelineError(data.message);
+    return () => {
+      cancelled = true;
+      if (socketRef.current) {
+        socketRef.current.onmessage = null;
+        socketRef.current.onerror = null;
+        socketRef.current.onclose = null;
+        socketRef.current.close();
+        socketRef.current = null;
       }
     };
-    // onerror fires (followed by onclose) in a couple of innocent cases — for
-    // example React dev's StrictMode double-mount closes the first socket
-    // while it is still CONNECTING, which the spec counts as a failure. Once
-    // the verdict (pipeline_complete / pipeline_failed) is in, the connection
-    // dying means nothing, so both handlers stay silent.
-    socket.onerror = () => {
-      if (!finishedRef.current) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
-    };
-    socket.onclose = () => {
-      // The server closes the socket when a run ends. If no verdict arrived,
-      // that is a genuine disconnection — never leave a "Build running"
-      // spinner forever.
-      if (!finishedRef.current) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
-    };
-
-    return () => {
-      // Detach BEFORE closing. React dev's StrictMode double-mount closes this
-      // socket while CONNECTING, and per spec a close during CONNECTING fires
-      // error then close — a dying mount's socket must not be allowed to paint
-      // "Lost connection" over the live socket that replaced it.
-      socket.onmessage = null;
-      socket.onerror = null;
-      socket.onclose = null;
-      socket.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingId, intent]);
+  }, [meetingId, intent, isCancelled]);
 
   // Lift the live state up to App.jsx so AI Workforce can show it too.
   useEffect(() => {
@@ -419,10 +465,37 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
             {completedCount}/{merged.length} stages complete
             {failedCount > 0 && <span style={{ color: "#E14B4B" }}> · {failedCount} failed</span>}
           </span>
+          {!finished && !pipelineError && (
+            <button
+              className="gp-cancel-btn"
+              onClick={handleCancelGeneration}
+              disabled={cancelling}
+              title="Stop the running generation"
+            >
+              <Square size={11} fill="currentColor" /> {cancelling ? "Cancelling…" : "Cancel Generation"}
+            </button>
+          )}
           {!finished && !pipelineError && <span className="gp-nav-pill"><span className="gp-dot" />Build running</span>}
-          {finished && failedCount > 0 && <span className="gp-nav-pill" style={{ color: "#E14B4B" }}>Build failed</span>}
+          {isCancelled && <span className="gp-nav-pill" style={{ color: "#E1884B", borderColor: "#E1884B" }}>Build cancelled</span>}
+          {finished && !isCancelled && failedCount > 0 && <span className="gp-nav-pill" style={{ color: "#E14B4B" }}>Build failed</span>}
+          {finished && !isCancelled && failedCount === 0 && <span className="gp-nav-pill" style={{ color: "#00E6A8", borderColor: "#00E6A8" }}>Prototype ready</span>}
         </div>
       </div>
+
+      {isCancelled && (
+        <div style={{ padding: "10px 20px", background: "#FFFBEB", borderBottom: "1px solid #FDE68A", fontSize: 12.5, color: "#92400E", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <AlertCircle size={14} color="#D97706" />
+            <span>Generation was cancelled. You can approve or edit requirements in the meeting and start fresh anytime.</span>
+          </div>
+          <button
+            onClick={() => onNavigate?.("live")}
+            style={{ background: "#F59E0B", color: "#fff", border: "none", borderRadius: 999, padding: "5px 14px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}
+          >
+            Back to Meeting
+          </button>
+        </div>
+      )}
 
       {pipelineError && (
         <div style={{ padding: "8px 20px", background: "#FDF3F3", borderBottom: "1px solid #F5D9D9", fontSize: 12, color: "#E14B4B", display: "flex", alignItems: "center", gap: 8 }}>

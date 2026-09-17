@@ -98,3 +98,26 @@ async def delete_meeting(meeting_id: str, session: MeetingSession = Depends(requ
     session_registry.delete(meeting_id)
     clear_extraction_state(meeting_id)
     return {"deleted": True, "meeting_id": meeting_id}
+
+
+@router.post("/{meeting_id}/cancel-generation")
+async def cancel_meeting_generation(session: MeetingSession = Depends(require_meeting_host)):
+    """Cancels an ongoing generation pipeline for this meeting. Host only."""
+    from app.ws.generate import cancel_pipeline
+    cancelled = cancel_pipeline(session.meeting_id)
+    return {"meeting_id": session.meeting_id, "cancelled": cancelled}
+
+
+@router.get("/{meeting_id}/generation-status")
+async def get_generation_status(meeting_id: str, current_user: User = Depends(get_current_user)):
+    """Returns whether generation is currently running and overall progress."""
+    session = get_session_or_404(meeting_id)
+    from app.ws.generate import get_pipeline_status
+    status = get_pipeline_status(session.meeting_id)
+    has_prototype = bool(session.agent_outputs.get("prototype"))
+    return {
+        "meeting_id": session.meeting_id,
+        "has_prototype": has_prototype,
+        **status,
+    }
+

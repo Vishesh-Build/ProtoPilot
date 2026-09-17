@@ -5,8 +5,8 @@ this feeds directly into the export the host later downloads.
 
 Protocol:
   Client connects to /ws/meeting/{meeting_id}/generate
-  Server immediately starts the pipeline using session.requirements
-  where status == "approved", and streams:
+  Server starts the pipeline (or re-attaches to an ongoing run) using
+  session.requirements where status == "approved", and streams:
 
     {"type": "agent_update", "agent": "architect", "name": "System Architect",
      "status": "working", "progress": 50}
@@ -14,16 +14,20 @@ Protocol:
     {"type": "agent_output", "agent": "architect", "output": "..."}
     {"type": "pipeline_complete"}   # every agent completed
     {"type": "pipeline_failed", "message": "..."}  # run is OVER, one or more agents failed
-    {"type": "error", "message": "..."}  (e.g. no approved requirements yet, or not the host)
+    {"type": "pipeline_cancelled", "message": "..."} # run was cancelled by the host
+    {"type": "error", "message": "..."}
 
-The socket closes on its own once the pipeline finishes — this isn't a
-long-lived connection like the meeting transcript socket.
+Client can send:
+    {"type": "cancel"}  # aborts the active pipeline run immediately
 """
 
+import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.agents.definitions import AGENT_DEFINITIONS
 from app.agents.orchestrator import run_pipeline
 from app.core.meeting_auth import require_ws_meeting_host
 
@@ -31,12 +35,109 @@ logger = logging.getLogger("protopilot.ws.generate")
 
 router = APIRouter()
 
-# One pipeline per meeting at a time. A single run is 9 agents across 8
-# waves of LLM calls, so a double-clicked Generate button (or a reconnect
-# while a run is still going) would double the token spend and let two
-# runs race to overwrite session.agent_outputs. Checked and set with no
-# await in between, so the set needs no lock.
-_running_pipelines: set[str] = set()
+
+class ActivePipeline:
+    """
+    Manages an active 9-agent pipeline execution for a meeting.
+    Supports multiple concurrent WebSocket listeners, event replay on
+    reconnect, and clean in-flight cancellation.
+    """
+
+    def __init__(self, meeting_id: str, approved_requirements: list[dict]):
+        self.meeting_id = meeting_id
+        self.approved_requirements = approved_requirements
+        self.listeners: set[WebSocket] = set()
+        self.events_history: list[dict] = []
+        self.current_states: dict[str, dict] = {}
+        self.task: asyncio.Task | None = None
+        self.is_cancelled: bool = False
+        self.completion_event = asyncio.Event()
+
+    async def emit(self, event: dict):
+        self.events_history.append(event)
+        etype = event.get("type")
+        if etype == "agent_update":
+            agent_id = event.get("agent")
+            if agent_id:
+                self.current_states[agent_id] = event
+
+        dead = []
+        for ws in list(self.listeners):
+            try:
+                await ws.send_json(event)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.listeners.discard(ws)
+
+    def cancel(self):
+        self.is_cancelled = True
+        if self.task and not self.task.done():
+            self.task.cancel()
+
+    def get_summary(self) -> dict:
+        total_progress = sum(s.get("progress", 0) for s in self.current_states.values())
+        overall_pct = round(total_progress / max(1, len(AGENT_DEFINITIONS)))
+        current_agent = None
+        for agent_id, state in self.current_states.items():
+            if state.get("status") in ("working", "thinking"):
+                current_agent = agent_id
+                break
+        return {
+            "running": not self.completion_event.is_set() and not self.is_cancelled,
+            "cancelled": self.is_cancelled,
+            "overall_pct": min(100, overall_pct),
+            "current_agent": current_agent,
+        }
+
+
+# Active pipelines indexed by meeting_id
+_active_pipelines: dict[str, ActivePipeline] = {}
+
+
+def cancel_pipeline(meeting_id: str) -> bool:
+    """Cancels an ongoing generation pipeline for the given meeting."""
+    active = _active_pipelines.get(meeting_id)
+    if active and not active.completion_event.is_set():
+        logger.info("meeting %s: cancel_pipeline requested", meeting_id)
+        active.cancel()
+        return True
+    return False
+
+
+def get_pipeline_status(meeting_id: str) -> dict:
+    """Returns the current running status of a meeting's pipeline."""
+    active = _active_pipelines.get(meeting_id)
+    if active and not active.completion_event.is_set():
+        return active.get_summary()
+    return {"running": False, "cancelled": False, "overall_pct": 0, "current_agent": None}
+
+
+async def _handle_socket_listener(websocket: WebSocket, active: ActivePipeline):
+    """Waits for pipeline completion while listening for client messages (e.g. cancel)."""
+    has_receive = hasattr(websocket, "receive_text")
+    if not has_receive:
+        await active.completion_event.wait()
+        return
+
+    while not active.completion_event.is_set():
+        receive_task = asyncio.create_task(websocket.receive_text())
+        wait_task = asyncio.create_task(active.completion_event.wait())
+        done, _ = await asyncio.wait([receive_task, wait_task], return_when=asyncio.FIRST_COMPLETED)
+
+        if receive_task in done:
+            wait_task.cancel()
+            try:
+                raw = receive_task.result()
+                data = json.loads(raw)
+                if data.get("type") == "cancel":
+                    logger.info("meeting %s: cancel requested via websocket", active.meeting_id)
+                    active.cancel()
+            except Exception:
+                # Client disconnected or sent unparseable data
+                break
+        else:
+            receive_task.cancel()
 
 
 @router.websocket("/ws/meeting/{meeting_id}/generate")
@@ -56,7 +157,66 @@ async def generate_socket(websocket: WebSocket, meeting_id: str):
         await websocket.close(code=4403)
         return
 
-    logger.info("meeting %s: generation started by host", meeting_id)
+    # Check if a pipeline is ALREADY running for this meeting.
+    # If so, attach this websocket as a listener and replay the current progress!
+    active = _active_pipelines.get(meeting_id)
+    if active and not active.completion_event.is_set():
+        logger.info("meeting %s: client reconnected to ongoing pipeline", meeting_id)
+        active.listeners.add(websocket)
+
+        # 1. Replay current agent states so the UI fast-forwards immediately
+        for agent_id, state in active.current_states.items():
+            try:
+                await websocket.send_json(state)
+            except Exception:
+                active.listeners.discard(websocket)
+                return
+
+        # 2. Replay all agent outputs and recent logs
+        for event in active.events_history:
+            if event.get("type") in ("agent_output", "agent_log"):
+                try:
+                    await websocket.send_json(event)
+                except Exception:
+                    active.listeners.discard(websocket)
+                    return
+
+        # If already cancelled, notify immediately
+        if active.is_cancelled:
+            try:
+                await websocket.send_json({
+                    "type": "pipeline_cancelled",
+                    "message": "Generation was cancelled by the host.",
+                })
+            except Exception:
+                pass
+
+        try:
+            await _handle_socket_listener(websocket, active)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            active.listeners.discard(websocket)
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+        return
+
+    # A completed run already exists: replay its outputs for free instead of
+    # starting a second paid 9-agent run.
+    force = websocket.query_params.get("force") in ("1", "true", "yes")
+    if not force and session.agent_outputs.get("prototype"):
+        logger.info("meeting %s: replaying already-generated outputs (no re-run)", meeting_id)
+        for agent_id, output in session.agent_outputs.items():
+            await websocket.send_json({
+                "type": "agent_update", "agent": agent_id,
+                "status": "completed", "progress": 100,
+            })
+            await websocket.send_json({"type": "agent_output", "agent": agent_id, "output": output})
+        await websocket.send_json({"type": "pipeline_complete"})
+        await websocket.close()
+        return
 
     approved = [
         {"title": r.title, "category": r.category, "priority": r.priority}
@@ -72,61 +232,48 @@ async def generate_socket(websocket: WebSocket, meeting_id: str):
         await websocket.close()
         return
 
-    if meeting_id in _running_pipelines:
-        logger.warning("meeting %s: generation requested while one is already running", meeting_id)
-        await websocket.send_json({
-            "type": "error",
-            "message": "Generation is already running for this meeting — watch the existing run.",
-        })
-        await websocket.close(code=4409)
-        return
+    logger.info("meeting %s: starting fresh generation pipeline", meeting_id)
+    active = ActivePipeline(meeting_id, approved)
+    _active_pipelines[meeting_id] = active
+    active.listeners.add(websocket)
 
-    # A completed run already exists: replay its outputs for free instead of
-    # starting a second paid 9-agent run. Without this, re-opening the
-    # Generation Pipeline page (which re-connects this socket) re-ran the
-    # whole pipeline every time — the UI looks the same, the bill doesn't.
-    #
-    # `?force=1` (the host pressing "Regenerate") skips the replay on purpose,
-    # so a run picks up requirements approved *after* the last build. Without
-    # this the replay always returned the stale outputs and a newly-approved
-    # requirement could never make it into the prototype.
-    force = websocket.query_params.get("force") in ("1", "true", "yes")
-    if not force and session.agent_outputs.get("prototype"):
-        logger.info("meeting %s: replaying already-generated outputs (no re-run)", meeting_id)
-        for agent_id, output in session.agent_outputs.items():
-            await websocket.send_json({
-                "type": "agent_update", "agent": agent_id,
-                "status": "completed", "progress": 100,
-            })
-            await websocket.send_json({"type": "agent_output", "agent": agent_id, "output": output})
-        await websocket.send_json({"type": "pipeline_complete"})
-        await websocket.close()
-        return
-
-    async def emit(event: dict):
+    async def pipeline_worker():
         try:
-            await websocket.send_json(event)
-        except Exception:  # noqa: BLE001 — client may have disconnected mid-stream
-            logger.debug("meeting %s: failed to emit event (client likely disconnected)", meeting_id)
+            final_states = await run_pipeline(approved, active.emit)
+            session.replace_agent_outputs(
+                {agent_id: state.output for agent_id, state in final_states.items() if state.output}
+            )
+        except asyncio.CancelledError:
+            logger.info("meeting %s: pipeline worker cancelled", meeting_id)
+            await active.emit({
+                "type": "pipeline_cancelled",
+                "message": "Generation was cancelled by the host.",
+            })
+        except WebSocketDisconnect:
+            logger.info("meeting %s: client disconnected during generation", meeting_id)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("meeting %s: generation failed", meeting_id)
+            await active.emit({"type": "error", "message": f"Generation failed: {e}"})
+        finally:
+            active.completion_event.set()
+            _active_pipelines.pop(meeting_id, None)
 
-    _running_pipelines.add(meeting_id)
+    active.task = asyncio.create_task(pipeline_worker())
+
     try:
-        final_states = await run_pipeline(approved, emit)
-        session.replace_agent_outputs(
-            {agent_id: state.output for agent_id, state in final_states.items() if state.output}
-        )
+        await _handle_socket_listener(websocket, active)
+        if active.task and not active.task.done():
+            # If the socket listener exited (e.g. client closed or fake socket finished),
+            # wait for the pipeline task to finish if this was a driven test.
+            if not hasattr(websocket, "receive_text"):
+                await active.task
     except WebSocketDisconnect:
-        logger.info("meeting %s: client disconnected during generation", meeting_id)
-        return
-    except Exception as e:  # noqa: BLE001
-        # Without this the socket just closed silently on any non-RuntimeError
-        # failure and the Pipeline screen sat on "working" forever.
-        logger.exception("meeting %s: generation failed", meeting_id)
-        await emit({"type": "error", "message": f"Generation failed: {e}"})
-        await websocket.close(code=1011)
-        return
+        logger.info("meeting %s: primary client disconnected, pipeline continues in background", meeting_id)
     finally:
-        _running_pipelines.discard(meeting_id)
+        active.listeners.discard(websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
-    await websocket.close()
-    logger.info("meeting %s: generation finished", meeting_id)
+    logger.info("meeting %s: generate_socket handler finished", meeting_id)

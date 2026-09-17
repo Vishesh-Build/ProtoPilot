@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   Copy, PhoneOff, X, Check, Zap, Settings, Smile, Send, Sparkles, Loader2, AlertCircle,
-  Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock, Maximize, Minimize, Volume2,
+  Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock, Maximize, Minimize, Volume2, Square,
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { meetingsApi, ApiError } from "../lib/api.js";
@@ -114,6 +114,14 @@ const styles = `
   }
   .lmc-navtab.locked { color: #B0B3C0; background: #F6F7F9; cursor: not-allowed; }
   .lmc-navtab-lock { margin-left: 1px; opacity: 0.75; }
+  .lmc-navtab-badge {
+    margin-left: 4px; padding: 2px 7px; border-radius: 999px;
+    font-size: 10px; font-weight: 700;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .lmc-navtab-badge.active-run {
+    background: rgba(0, 230, 168, 0.18); color: #008761;
+  }
 
   .lmc-body {
     display: grid;
@@ -349,6 +357,21 @@ const styles = `
   .lmc-generate-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(74,99,232,0.42); filter: brightness(1.04); }
   .lmc-generate-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
 
+  .lmc-generation-banner {
+    background: #F4F6FD; border: 1px solid #DCE3F8; border-radius: 14px;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .lmc-cancel-gen-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    background: #FEE2E2; color: #DC2626; border: 1px solid #FCA5A5;
+    border-radius: 999px; padding: 7px 12px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .lmc-cancel-gen-btn:hover:not(:disabled) {
+    background: #DC2626; color: #fff; border-color: #DC2626;
+  }
+  .lmc-cancel-gen-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
   .lmc-points-footer { flex-shrink: 0; margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
   .lmc-points-count { font-size: 10.5px; color: #9A9EB0; text-align: right; }
 
@@ -575,6 +598,10 @@ export default function LiveMeetingCall({
   // Host-typed "we missed one" requirement (added straight as approved).
   const [newPointText, setNewPointText] = useState("");
   const [addingPoint, setAddingPoint] = useState(false);
+  const [generationRunning, setGenerationRunning] = useState(false);
+  const [generationPercent, setGenerationPercent] = useState(0);
+  const [generationAgent, setGenerationAgent] = useState("");
+  const [cancellingGen, setCancellingGen] = useState(false);
 
   const [connectionState, setConnectionState] = useState("connecting"); // connecting | connected | error
   const [connectionError, setConnectionError] = useState("");
@@ -759,10 +786,22 @@ export default function LiveMeetingCall({
         setConnectionState("connected");
       } catch (err) {
         if (cancelled) return;
-        const message =
-          err instanceof ApiError
-            ? err.message
-            : "Couldn't connect to the call — check your camera/mic permissions and connection.";
+        console.error("[LiveMeetingCall] Connection error:", err);
+        let message = "Couldn't connect to the call — check your camera/mic permissions and connection.";
+        if (err instanceof ApiError) {
+          message = err.message;
+        } else if (err && err.message) {
+          const m = err.message.toLowerCase();
+          if (m.includes("429") || m.includes("rate limit") || m.includes("status: 429") || m.includes("handshake")) {
+            message = "LiveKit Cloud quota exceeded (429 Rate Limited). Please update LiveKit credentials on your server.";
+          } else if (err.name === "NotAllowedError" || m.includes("permission denied") || m.includes("notallowed")) {
+            message = "Microphone access denied. Please allow microphone permissions in Windows Settings.";
+          } else if (err.name === "NotFoundError" || m.includes("notfound") || m.includes("no device")) {
+            message = "No microphone found. Please connect a microphone.";
+          } else {
+            message = `Call connection failed: ${err.message}`;
+          }
+        }
         setConnectionError(message);
         setConnectionState("error");
       }
@@ -893,6 +932,57 @@ export default function LiveMeetingCall({
       .then((s) => setPrototypeReady(Boolean(s.has_prototype)))
       .catch(() => {});
   }, [meetingId, connectionState]);
+
+  // Poll generation status so if the host triggered generation and returned to the call,
+  // we monitor progress in real-time, unlock Pipeline in the topbar, and provide cancel controls.
+  useEffect(() => {
+    if (!meetingId) return;
+    let isSubscribed = true;
+
+    const checkGenStatus = async () => {
+      try {
+        const data = await meetingsApi.generationStatus(meetingId);
+        if (!isSubscribed) return;
+        const isRun = Boolean(data.running || data.is_running);
+        setGenerationRunning(isRun);
+        if (typeof data.overall_pct === "number") {
+          setGenerationPercent(data.overall_pct);
+        } else if (typeof data.overall_percent === "number") {
+          setGenerationPercent(data.overall_percent);
+        }
+        if (data.current_agent) {
+          setGenerationAgent(data.current_agent);
+        }
+        if (data.has_prototype) {
+          setPrototypeReady(true);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    checkGenStatus();
+    const interval = setInterval(checkGenStatus, 2500);
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [meetingId]);
+
+  const handleCancelGeneration = async () => {
+    if (!meetingId || !isHost || cancellingGen) return;
+    setCancellingGen(true);
+    try {
+      await meetingsApi.cancelGeneration(meetingId);
+      setGenerationRunning(false);
+      setGenerationPercent(0);
+      setGenerationAgent("");
+    } catch (err) {
+      console.warn("Couldn't cancel generation:", err.message);
+    } finally {
+      setCancellingGen(false);
+    }
+  };
 
   /* ---------- Controls ---------- */
 
@@ -1203,7 +1293,8 @@ export default function LiveMeetingCall({
                 { key: "pipeline", label: "Pipeline", icon: GitBranch, onClick: onOpenPipeline },
                 { key: "prototype", label: "Prototype", icon: Eye, onClick: onViewPrototype },
               ].map((t) => {
-                const locked = !t.active && !prototypeReady;
+                const isPipelineRunning = t.key === "pipeline" && generationRunning;
+                const locked = !t.active && !prototypeReady && !isPipelineRunning;
                 return (
                   <button
                     key={t.key}
@@ -1211,10 +1302,21 @@ export default function LiveMeetingCall({
                     className={`lmc-navtab ${t.active ? "active" : ""} ${locked ? "locked" : ""}`}
                     disabled={t.active || locked}
                     onClick={() => { if (!t.active && !locked) t.onClick?.(); }}
-                    title={locked ? "Unlocks once you generate the prototype" : t.label}
+                    title={
+                      locked
+                        ? "Unlocks once you generate the prototype"
+                        : isPipelineRunning
+                        ? `Generation running (${generationPercent}%) — click to view live progress`
+                        : t.label
+                    }
                   >
                     <t.icon size={13} />
                     <span>{t.label}</span>
+                    {isPipelineRunning && (
+                      <span className="lmc-navtab-badge active-run">
+                        <Loader2 size={10} className="lmc-spin" /> {generationPercent}%
+                      </span>
+                    )}
                     {locked && <Lock size={11} className="lmc-navtab-lock" />}
                   </button>
                 );
@@ -1485,7 +1587,40 @@ export default function LiveMeetingCall({
                     )}
                     <div className="lmc-points-count">{acceptedCount} of {points.length} accepted</div>
                     {isHost ? (
-                      prototypeReady ? (
+                      generationRunning ? (
+                        <div className="lmc-generation-banner">
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11.5, fontWeight: 600, color: "#14151B" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <Loader2 size={13} className="lmc-spin" style={{ color: "#4A63E8" }} />
+                              <span>Building prototype… {generationAgent ? `(${generationAgent})` : ""}</span>
+                            </div>
+                            <span style={{ color: "#4A63E8", fontWeight: 700 }}>{generationPercent}%</span>
+                          </div>
+                          <div style={{ width: "100%", height: 5, background: "rgba(0,0,0,0.08)", borderRadius: 999, overflow: "hidden" }}>
+                            <div style={{ width: `${Math.max(5, Math.min(100, generationPercent))}%`, height: "100%", background: "linear-gradient(90deg, #4A63E8, #00E6A8)", borderRadius: 999, transition: "width 0.4s ease" }} />
+                          </div>
+                          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                            <button
+                              type="button"
+                              className="lmc-generate-btn"
+                              style={{ flex: 1, padding: "8px 12px", fontSize: 11.5 }}
+                              onClick={() => onOpenPipeline?.()}
+                              title="View pipeline live progress and logs"
+                            >
+                              <GitBranch size={13} /> View Progress
+                            </button>
+                            <button
+                              type="button"
+                              className="lmc-cancel-gen-btn"
+                              onClick={handleCancelGeneration}
+                              disabled={cancellingGen}
+                              title="Cancel ongoing generation"
+                            >
+                              <Square size={11} fill="currentColor" /> {cancellingGen ? "Cancelling…" : "Cancel"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : prototypeReady ? (
                         <div style={{ display: "flex", gap: 8 }}>
                           <button
                             className="lmc-generate-btn"

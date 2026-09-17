@@ -31,6 +31,22 @@ const path = require("path");
 const http = require("http");
 const fs = require("fs");
 
+let mainWindow = null;
+
+// Enforce single-instance lock: prevents multiple instances fighting over port 5173
+// and showing a blank white screen.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 ipcMain.handle("protopilot:write-clipboard", (_event, text) => {
   if (typeof text === "string") {
     clipboard.writeText(text);
@@ -119,6 +135,14 @@ ipcMain.on("protopilot:get-api-base-url", (event) => {
   event.returnValue = API_BASE_URL;
 });
 
+ipcMain.handle("protopilot:set-api-base-url", (_event, url) => {
+  try {
+    return setApiBaseUrl(url);
+  } catch (err) {
+    return null;
+  }
+});
+
 /* ------------------------------------------------------------
    Screen-share source picker (Zoom-style).
 
@@ -203,8 +227,16 @@ function startProductionServer(distDir) {
       });
     });
 
-    server.on("error", reject);
-    server.listen(APP_PORT, "localhost", () => resolve(server));
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.warn(`[server] Port ${APP_PORT} already in use; reusing existing server.`);
+        resolve(null);
+      } else {
+        reject(err);
+      }
+    });
+
+    server.listen(APP_PORT, "127.0.0.1", () => resolve(server));
   });
 }
 
@@ -288,12 +320,20 @@ async function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: "ProtoPilot",
+    backgroundColor: "#0b0f19",
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  mainWindow = win;
+
+  win.once("ready-to-show", () => {
+    win.show();
   });
 
   win.setMenuBarVisibility(false);
@@ -338,12 +378,25 @@ async function createWindow() {
 
   if (app.isPackaged) {
     const distDir = path.join(__dirname, "..", "dist");
-    await startProductionServer(distDir);
+    try {
+      await startProductionServer(distDir);
+    } catch (err) {
+      console.error("[main] startProductionServer error:", err);
+    }
   }
   // In dev, `npm run electron:dev` waits for the Vite dev server (also on
   // port 5173) before launching Electron — see package.json.
 
-  await win.loadURL(APP_URL);
+  try {
+    await win.loadURL(APP_URL);
+  } catch (err) {
+    console.error("[main] Initial win.loadURL failed, retrying in 1s:", err);
+    setTimeout(() => {
+      if (!win.isDestroyed()) {
+        win.loadURL(APP_URL).catch((e) => console.error("[main] Retry win.loadURL failed:", e));
+      }
+    }, 1000);
+  }
 
   setupAutoUpdater(win);
 

@@ -47,4 +47,6 @@ contextBridge.exposeInMainWorld("protopilotDesktop", {
   getScreenSources: () => ipcRenderer.invoke("protopilot:get-screen-sources"),
   // --- Native Clipboard ---
   writeClipboard: (text) => ipcRenderer.invoke("protopilot:write-clipboard", text),
+  // --- Configure backend API URL ---
+  setApiBaseUrl: (url) => ipcRenderer.invoke("protopilot:set-api-base-url", url),
 });
