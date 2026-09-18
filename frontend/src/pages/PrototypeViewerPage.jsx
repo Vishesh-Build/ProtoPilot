@@ -4,6 +4,7 @@ import {
   Monitor, Tablet, Smartphone,
   RefreshCw, ExternalLink, ChevronRight,
   Layers, Clock, Sparkles, Copy, Check, Link2, AlertCircle, Download, Loader2,
+  Maximize2, Minimize2,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
 import { meetingsApi } from "../lib/api.js";
@@ -184,6 +185,17 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
   const [uiPlan, setUiPlan] = useState(null);
   const [exportReady, setExportReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && isFullScreen) {
+        setIsFullScreen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullScreen]);
 
   useEffect(() => {
     if (!meetingId) { setStatus("no-meeting"); return; }
@@ -212,9 +224,24 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
     return () => { cancelled = true; };
   }, [meetingId]);
 
-  const openInNewTab = () => {
-    const blob = new Blob([prototypeHtml], { type: "text/html" });
-    window.open(URL.createObjectURL(blob), "_blank");
+  const toggleFullScreen = () => {
+    setIsFullScreen((prev) => !prev);
+  };
+
+  const openInBrowser = async () => {
+    if (!prototypeHtml) return;
+    if (window.protopilotDesktop && window.protopilotDesktop.openPrototypeInBrowser) {
+      const ok = await window.protopilotDesktop.openPrototypeInBrowser(prototypeHtml);
+      if (ok) return;
+    }
+    // Web fallback
+    try {
+      const blob = new Blob([prototypeHtml], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch (err) {
+      console.warn("Open in browser failed:", err);
+    }
   };
 
   const handleExport = async () => {
@@ -283,7 +310,8 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
             {status === "ready" && (
               <>
                 <div className="pv-tool-btn" title="Reload" onClick={() => window.location.reload()}><RefreshCw size={13} /></div>
-                <div className="pv-tool-btn primary" onClick={openInNewTab}><ExternalLink size={13} /> Open full screen</div>
+                <div className="pv-tool-btn" title="Open in default browser (Chrome / Edge)" onClick={openInBrowser}><ExternalLink size={13} /> Open in browser</div>
+                <div className="pv-tool-btn primary" onClick={toggleFullScreen}><Maximize2 size={13} /> Open full screen</div>
               </>
             )}
           </div>
@@ -362,6 +390,95 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
           </div>
         </div>
       </div>
+
+      {isFullScreen && status === "ready" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 99999,
+            background: "#0b0f19",
+            width: "100vw",
+            height: "100vh",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 20px",
+              background: "rgba(18, 24, 38, 0.95)",
+              borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+              backdropFilter: "blur(12px)",
+              color: "#f3f4f6",
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div className="pv-device-switch" style={{ background: "rgba(255,255,255,0.1)", borderColor: "rgba(255,255,255,0.15)" }}>
+                {DEVICES.map((d) => (
+                  <div
+                    key={d.id}
+                    className={`pv-device-btn ${device === d.id ? "active" : ""}`}
+                    style={device === d.id ? { background: "#4A63E8", color: "#fff" } : { color: "#9ca3af" }}
+                    onClick={() => setDevice(d.id)}
+                    title={d.label}
+                  >
+                    <d.icon size={14} />
+                  </div>
+                ))}
+              </div>
+              <span style={{ fontSize: "13px", color: "#9ca3af", fontWeight: 500 }}>
+                Full Screen Preview (Press <kbd style={{ padding: "2px 6px", background: "rgba(255,255,255,0.15)", borderRadius: "4px", fontSize: "11px" }}>Esc</kbd> to exit)
+              </span>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <button
+                type="button"
+                className="pv-tool-btn"
+                style={{ background: "rgba(255,255,255,0.1)", color: "#f3f4f6", borderColor: "rgba(255,255,255,0.15)" }}
+                onClick={openInBrowser}
+                title="Open in default browser (Chrome / Edge)"
+              >
+                <ExternalLink size={13} /> Open in browser
+              </button>
+              <button
+                type="button"
+                className="pv-tool-btn primary"
+                onClick={toggleFullScreen}
+                title="Exit full screen"
+              >
+                <Minimize2 size={13} /> Exit Full Screen
+              </button>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto", background: "#0b0f19", padding: device === "desktop" ? "0" : "20px" }}>
+            <div className={`pv-device-frame ${device}`} style={device === "desktop" ? { width: "100%", height: "100%", borderRadius: 0 } : {}}>
+              {device !== "desktop" && (
+                <div className="pv-device-chrome">
+                  <span className="pv-chrome-dot" style={{ background: "#FF5F57" }} />
+                  <span className="pv-chrome-dot" style={{ background: "#FEBC2E" }} />
+                  <span className="pv-chrome-dot" style={{ background: "#28C840" }} />
+                </div>
+              )}
+              <div className="pv-device-screen" style={{ width: "100%", height: "100%" }}>
+                <iframe
+                  title="Generated prototype fullscreen"
+                  srcDoc={prototypeHtml}
+                  sandbox="allow-scripts allow-forms"
+                  style={{ width: "100%", height: "100%", border: "none" }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`.pv-spin { animation: pvSpin 1s linear infinite; } @keyframes pvSpin { to { transform: rotate(360deg); } }`}</style>
     </div>

@@ -54,6 +54,20 @@ ipcMain.handle("protopilot:write-clipboard", (_event, text) => {
   }
   return false;
 });
+
+ipcMain.handle("protopilot:open-html-in-browser", async (_event, htmlContent) => {
+  if (typeof htmlContent !== "string") return false;
+  try {
+    const tempDir = app.getPath("temp");
+    const tempFile = path.join(tempDir, "protopilot-preview.html");
+    fs.writeFileSync(tempFile, htmlContent, "utf8");
+    await shell.openPath(tempFile);
+    return true;
+  } catch (err) {
+    console.error("[main] Failed to open prototype in browser:", err);
+    return false;
+  }
+});
 // electron-updater is imported lazily inside setupAutoUpdater() so a dev run
 // (npm run electron:dev, app NOT packaged) never touches it — it only matters
 // for an installed NSIS build talking to GitHub Releases.
@@ -401,6 +415,10 @@ async function createWindow() {
   // system browser instead of spawning a new Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedOrigin(url)) {
+      return { action: "allow" };
+    }
+    // Never hand blob: or data: URLs to Windows shell (causes "Get an app to open this blob link" error)
+    if (url.startsWith("blob:") || url.startsWith("data:")) {
       return { action: "allow" };
     }
     shell.openExternal(url);

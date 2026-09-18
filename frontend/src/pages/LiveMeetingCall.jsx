@@ -656,11 +656,31 @@ export default function LiveMeetingCall({
   const roomRef = useRef(null);
   const socketRef = useRef(null);
   const startedAtRef = useRef(null);
-  const scrollRef = useRef(null);
+  const pointsScrollRef = useRef(null);
+  const chatScrollRef = useRef(null);
+  const prevPointsLengthRef = useRef(0);
 
+  // Auto-scroll chat only when new messages arrive or when switching to the chat tab
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [tab, chatMessages, points]);
+    if (tab === "chat" && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [tab, chatMessages]);
+
+  // For points: NEVER scroll when ticking, rejecting, or editing points!
+  // Only scroll when brand new points are added from audio AND user is already near bottom.
+  useEffect(() => {
+    if (points.length > prevPointsLengthRef.current) {
+      const el = pointsScrollRef.current;
+      if (el) {
+        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (isNearBottom || prevPointsLengthRef.current === 0) {
+          el.scrollTop = el.scrollHeight;
+        }
+      }
+    }
+    prevPointsLengthRef.current = points.length;
+  }, [points.length]);
 
   const bars = Array.from({ length: 12 });
 
@@ -1498,7 +1518,7 @@ export default function LiveMeetingCall({
                     <span className="lmc-points-badge">AUTO</span>
                   </div>
 
-                  <div ref={scrollRef} className="lmc-scroll" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 2, minHeight: 0 }}>
+                  <div ref={pointsScrollRef} className="lmc-scroll" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 2, minHeight: 0 }}>
                     {points.length === 0 && (
                       <div style={{ fontSize: 12, color: "#9A9EB0", padding: "8px 2px" }}>
                         Nothing captured yet — points appear here automatically as the conversation happens.
@@ -1652,7 +1672,7 @@ export default function LiveMeetingCall({
                   </div>
                 </>
               ) : (
-                <div ref={scrollRef} className="lmc-scroll" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingRight: 2, minHeight: 0 }}>
+                <div ref={chatScrollRef} className="lmc-scroll" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingRight: 2, minHeight: 0 }}>
                   {tab === "chat" && chatMessages.length === 0 && (
                     <div style={{ fontSize: 12, color: "#9A9EB0" }}>No messages yet — say hi.</div>
                   )}

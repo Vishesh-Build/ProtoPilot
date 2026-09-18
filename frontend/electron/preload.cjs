@@ -49,4 +49,6 @@ contextBridge.exposeInMainWorld("protopilotDesktop", {
   writeClipboard: (text) => ipcRenderer.invoke("protopilot:write-clipboard", text),
   // --- Configure backend API URL ---
   setApiBaseUrl: (url) => ipcRenderer.invoke("protopilot:set-api-base-url", url),
+  // --- Open Prototype HTML in default system browser safely ---
+  openPrototypeInBrowser: (html) => ipcRenderer.invoke("protopilot:open-html-in-browser", html),
 });
