@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, exports, health, livekit_router, llm_test, meetings, oauth, requirements
+from app.api import admin, auth, exports, health, livekit_router, llm_test, meetings, oauth, requirements
 from app.config import settings
 from app.db.database import init_models
 from app.ws import generate, meeting
@@ -19,7 +19,7 @@ _file_handler = logging.handlers.RotatingFileHandler(_LOG_FILE, maxBytes=5_000_0
 _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
 logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(), _file_handler])
 
-app = FastAPI(title="ProtoPilot Backend", version="0.2.0")
+app = FastAPI(title="ProtoPilot Backend", version="0.3.0")
 
 # The Electron app always loads over http://localhost:5173 — the Vite dev
 # server during development, and a small local static server (started in
@@ -76,6 +76,8 @@ async def on_startup():
         from app.meetings.store import init_store
         store = init_store(settings.meeting_store_path)
     session_registry.set_store(store)
+    from app.services.diagnostics import diagnostics_service
+    diagnostics_service.initialize()
 
 
 @app.on_event("shutdown")
@@ -85,6 +87,7 @@ async def on_shutdown():
 
 
 app.include_router(health.router)
+app.include_router(admin.router)
 app.include_router(llm_test.router)
 app.include_router(auth.router)
 app.include_router(oauth.router)

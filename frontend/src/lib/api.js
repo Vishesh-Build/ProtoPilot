@@ -82,12 +82,22 @@ async function request(path, options = {}) {
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const signal = options.signal || controller.signal;
 
+  const adminSecret =
+    typeof window !== "undefined" ? sessionStorage.getItem("admin_secret") : null;
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (adminSecret && !headers["X-Admin-Secret"]) {
+    headers["X-Admin-Secret"] = adminSecret;
+  }
+
   let res;
   try {
-    const { timeout, ...fetchOptions } = options;
+    const { timeout, headers: _h, ...fetchOptions } = options;
     res = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers,
       signal,
       ...fetchOptions,
     });
@@ -111,10 +121,10 @@ async function request(path, options = {}) {
       const replayTimeoutId = setTimeout(() => replayController.abort(), timeoutMs);
       const replaySignal = options.signal || replayController.signal;
       try {
-        const { timeout, ...fetchOptions } = options;
+        const { timeout, headers: _h, ...fetchOptions } = options;
         res = await fetch(`${API_BASE_URL}${path}`, {
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers,
           signal: replaySignal,
           ...fetchOptions,
         });
@@ -251,6 +261,26 @@ export const meetingsApi = {
 
   generationStatus: (meetingId) =>
     request(`/meetings/${meetingId}/generation-status`),
+};
+
+export const adminApi = {
+  verifyAccess: (secret) =>
+    request("/admin/verify-access", {
+      method: "POST",
+      body: JSON.stringify({ secret }),
+      headers: secret ? { "X-Admin-Secret": secret } : {},
+    }),
+
+  health: () => request("/admin/health"),
+
+  incidents: () => request("/admin/incidents"),
+
+  testAll: () => request("/admin/test-all", { method: "POST" }),
+
+  resolveIncident: (incidentId) =>
+    request(`/admin/resolve-incident/${incidentId}`, { method: "POST" }),
+
+  clearResolved: () => request("/admin/clear-resolved", { method: "POST" }),
 };
 
 export { ApiError };

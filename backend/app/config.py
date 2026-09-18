@@ -265,6 +265,13 @@ class Settings(BaseSettings):
     # should reach this backend.
     extra_cors_origins: str = ""
 
+    # ---- Admin & System Diagnostics ----
+    # Secret key required to access the /admin diagnostics dashboard.
+    # Keep this secret so only you can access it. Override via ADMIN_SECRET_KEY in .env.
+    admin_secret_key: str = "protopilot-admin-2026"
+    # Optional comma-separated list of emails that automatically have admin privileges.
+    admin_emails: str = ""
+
     # ---- Outbound email (forgot-password links) ----
     # Any standard SMTP provider works (Gmail app password, Resend, SendGrid
     # SMTP relay, Mailgun SMTP, etc.) — this backend doesn't fake-send email;

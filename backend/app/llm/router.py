@@ -241,6 +241,18 @@ class LLMRouter:
                         provider.name,
                         "rate limited" if e.rate_limited else "overloaded (5xx)",
                     )
+                    try:
+                        from app.services.diagnostics import diagnostics_service
+                        diagnostics_service.record_incident(
+                            category="LLM_QUOTA",
+                            title=f"{provider.name.capitalize()} Quota / Rate Limit (429)",
+                            reason=f"Provider {provider.name} exceeded requests or tokens per minute limit.",
+                            solution=f"Wait for window reset, or configure alternative provider key (e.g. GEMINI_API_KEY) in backend/.env.",
+                            severity="WARNING",
+                            raw_details=e.message,
+                        )
+                    except Exception:
+                        pass
                     errors.append(f"{provider.name}: {e.message}")
                     continue
                 if e.model_gone:
@@ -260,6 +272,18 @@ class LLMRouter:
                 continue
 
         if errors:
+            try:
+                from app.services.diagnostics import diagnostics_service
+                diagnostics_service.record_incident(
+                    category="LLM_QUOTA",
+                    title="All LLM Providers Exhausted / Failed",
+                    reason=f"All configured LLM providers returned errors: {'; '.join(errors)}",
+                    solution="Check API keys in backend/.env or Render dashboard. Ensure at least Groq or Gemini has available token quota.",
+                    severity="CRITICAL",
+                    raw_details="; ".join(errors),
+                )
+            except Exception:
+                pass
             raise RuntimeError("All LLM providers failed or are unavailable. " + "; ".join(errors))
 
         # Nothing was even attempted. Say WHICH of the two reasons it was:

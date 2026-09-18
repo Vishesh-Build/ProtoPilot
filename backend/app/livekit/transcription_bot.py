@@ -372,8 +372,20 @@ async def run_transcription_bot(meeting_id: str):
         await asyncio.Event().wait()
     except asyncio.CancelledError:
         pass
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("meeting %s: transcription bot crashed", meeting_id)
+        try:
+            from app.services.diagnostics import diagnostics_service
+            diagnostics_service.record_incident(
+                category="VIDEO_CALL",
+                title=f"LiveKit Transcription Bot Connection Error (Room: {meeting_id})",
+                reason=f"Transcription bot failed to connect or crashed: {exc}",
+                solution="Verify LiveKit project status and credentials at https://cloud.livekit.io. Check LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in environment.",
+                severity="CRITICAL",
+                raw_details=str(exc),
+            )
+        except Exception:
+            pass
     finally:
         for task in tasks.values():
             task.cancel()

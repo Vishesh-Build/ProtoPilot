@@ -209,10 +209,25 @@ function formatDuration(createdAt, endedAt) {
   return mins < 1 ? "<1 min" : `${mins} min`;
 }
 
-export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWorkforce, onOpenPrototype, onJoinMeeting, currentUser, onLogout }) {
+export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWorkforce, onOpenPrototype, onJoinMeeting, currentUser, onLogout, onOpenAdmin }) {
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+
+  const [logoClicks, setLogoClicks] = useState(0);
+  const logoTimerRef = React.useRef(null);
+  const handleLogoClick = () => {
+    setLogoClicks((prev) => {
+      const next = prev + 1;
+      if (next >= 3) {
+        onOpenAdmin?.();
+        return 0;
+      }
+      if (logoTimerRef.current) clearTimeout(logoTimerRef.current);
+      logoTimerRef.current = setTimeout(() => setLogoClicks(0), 1000);
+      return next;
+    });
+  };
 
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinId, setJoinId] = useState("");
@@ -339,7 +354,7 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
       <div className="db-bg-tint" />
 
       <div className="db-nav">
-        <div className="db-nav-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
+        <div className="db-nav-mark" onClick={handleLogoClick} style={{ cursor: "pointer" }} title="ProtoPilot"><img src="/logo.png" alt="ProtoPilot" /></div>
         <div className="db-nav-tabs">
           {NAV_TABS.map((t) => (
             <div

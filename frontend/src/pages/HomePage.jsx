@@ -260,10 +260,25 @@ const REQUIREMENT_POINTS = [
 
 /* ---------------- component ---------------- */
 
-export default function HomePage({ onLogin, onRegister, onGetStarted }) {
+export default function HomePage({ onLogin, onRegister, onGetStarted, onOpenAdmin }) {
   const sectionRef = useRef(null);
   const timeouts = useRef([]);
   const hasStarted = useRef(false);
+
+  const [logoClicks, setLogoClicks] = useState(0);
+  const logoTimerRef = useRef(null);
+  const handleLogoClick = () => {
+    setLogoClicks((prev) => {
+      const next = prev + 1;
+      if (next >= 3) {
+        onOpenAdmin?.();
+        return 0;
+      }
+      if (logoTimerRef.current) clearTimeout(logoTimerRef.current);
+      logoTimerRef.current = setTimeout(() => setLogoClicks(0), 1000);
+      return next;
+    });
+  };
   const [scrolled, setScrolled] = useState(false);
 
   const [lineIdx, setLineIdx] = useState(0);
@@ -355,7 +370,7 @@ export default function HomePage({ onLogin, onRegister, onGetStarted }) {
         borderBottom: scrolled ? "1px solid #EEF0F6" : "1px solid transparent",
         transition: "all 0.25s ease",
       }}>
-        <div className="pp-logo">
+        <div className="pp-logo" onClick={handleLogoClick} style={{ cursor: "pointer" }} title="ProtoPilot">
           <div className="pp-logo-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
           <span className="pp-display">ProtoPilot</span>
         </div>

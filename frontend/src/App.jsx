@@ -10,6 +10,7 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import AIWorkforcePage from "./pages/AIWorkforcePage.jsx";
 import GenerationPipelinePage from "./pages/GenerationPipelinePage.jsx";
 import PrototypeViewerPage from "./pages/PrototypeViewerPage.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 import UpdateNotification from "./components/UpdateNotification.jsx";
 import { authApi, meetingsApi, API_BASE_URL } from "./lib/api.js";
 
@@ -50,14 +51,27 @@ export default function App() {
   const params = getSearchParams();
   const initialToken = params.get("token");
   const cameFromOAuth = params.get("oauth") === "success";
+  const wantsAdmin = params.get("page") === "admin" || params.get("admin") === "1";
 
-  const [page, setPage] = useState(initialToken ? "reset" : "home");
+  const [page, setPage] = useState(initialToken ? "reset" : wantsAdmin ? "admin" : "home");
   const [resetToken, setResetToken] = useState(initialToken);
   const [currentUser, setCurrentUser] = useState(null);
   const [checkingSession, setCheckingSession] = useState(!initialToken);
 
   const [activeMeetingId, setActiveMeetingId] = useState(null);
   const [isMeetingHost, setIsMeetingHost] = useState(true);
+
+  // Global secret shortcut (Ctrl + Shift + A) to open/toggle Admin Console
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "A" || e.key === "a")) {
+        e.preventDefault();
+        setPage((prev) => (prev === "admin" ? (currentUser ? "dashboard" : "home") : "admin"));
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentUser]);
 
   // True while a live call should stay connected in the background. The app
   // renders one page at a time, so without this, navigating from the meeting
@@ -94,7 +108,10 @@ export default function App() {
       .then((user) => {
         if (cancelled) return;
         setCurrentUser(user);
-        setPage((p) => (p === "home" || cameFromOAuth ? "dashboard" : p));
+        setPage((p) => {
+          if (p === "admin") return "admin";
+          return p === "home" || cameFromOAuth ? "dashboard" : p;
+        });
       })
       .catch(() => {})
       .finally(() => {
@@ -301,6 +318,7 @@ export default function App() {
               if (meetingId) setActiveMeetingId(meetingId);
               setPage("viewer");
             }}
+            onOpenAdmin={() => setPage("admin")}
           />
         );
 
@@ -313,6 +331,20 @@ export default function App() {
       case "viewer":
         return <PrototypeViewerPage meetingId={activeMeetingId} onNavigate={navigate} onOpenPipeline={() => navigate("pipeline")} />;
 
+      case "admin":
+        return (
+          <AdminPage
+            currentUser={currentUser}
+            onBack={() => {
+              if (wantsAdmin && !currentUser) {
+                setPage("home");
+              } else {
+                setPage(currentUser ? "dashboard" : "home");
+              }
+            }}
+          />
+        );
+
       case "home":
       default:
         return (
@@ -320,6 +352,7 @@ export default function App() {
             onLogin={() => setPage("login")}
             onRegister={() => setPage("register")}
             onGetStarted={() => setPage("register")}
+            onOpenAdmin={() => setPage("admin")}
           />
         );
     }
