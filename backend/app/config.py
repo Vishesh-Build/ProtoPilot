@@ -197,9 +197,9 @@ class Settings(BaseSettings):
     whisper_gpu_compute_type: str = "float16"
     # Falls back to this smaller model on CPU (no GPU found, or the GPU
     # ran out of memory) so CPU-only mode stays fast rather than
-    # accurate-but-slow. See app/transcription/whisper_service.py for the
-    # actual CUDA-then-CPU fallback logic.
-    whisper_cpu_fallback_model_size: str = "small"
+    # accurate-but-slow. Using 'tiny' (~75MB) protects 512MB RAM cloud
+    # hosts (e.g. Render) from running out of memory.
+    whisper_cpu_fallback_model_size: str = "tiny"
     whisper_compute_type: str = "int8"
     # beam_size=5 (faster-whisper's own default) is noticeably slower on CPU
     # for little accuracy gain in a live-meeting setting — 3 is a good

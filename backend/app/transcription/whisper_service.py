@@ -122,20 +122,24 @@ def _cuda_warmup_transcribe(model: WhisperModel) -> None:
         pass
 
 
+def is_cuda_available() -> bool:
+    """Returns True only if ctranslate2 can actually see one or more CUDA devices."""
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
 def _load_model_blocking(force_cpu: bool = False) -> tuple[WhisperModel, str]:
     """
     Runs on a worker thread (model loading is blocking). Tries CUDA first
-    (unless force_cpu, e.g. because CUDA already failed once at runtime
-    this session), falls back to CPU on any failure — wrong CUDA/cuDNN
-    install, no GPU present, or the GPU running out of memory for this
-    model size are all treated the same way: log it and fall back, never
-    crash the app over it.
-
-    "Any failure" includes the warmup: a model that loads but can't run
-    one real transcribe is NOT a working CUDA model, and handing it to a
-    live meeting is how a caption ends up 10x slower than it should be.
+    only if CUDA hardware is actually present (and not force_cpu).
+    If no CUDA device exists (e.g. Render CPU or non-GPU laptop), it skips
+    the 1.5GB GPU model download entirely and loads the lightweight CPU
+    model directly to prevent OOM container kills.
     """
-    if not force_cpu:
+    if not force_cpu and is_cuda_available():
         try:
             logger.info(
                 "Loading faster-whisper model=%s on CUDA (compute_type=%s)...",
@@ -154,6 +158,11 @@ def _load_model_blocking(force_cpu: bool = False) -> tuple[WhisperModel, str]:
                 "faster-whisper: CUDA unavailable (%s) — falling back to CPU with model=%s",
                 e, settings.whisper_cpu_fallback_model_size,
             )
+    elif not force_cpu:
+        logger.info(
+            "faster-whisper: No CUDA hardware detected — skipping %s GPU download and using CPU model=%s directly.",
+            settings.whisper_model_size, settings.whisper_cpu_fallback_model_size,
+        )
 
     model = WhisperModel(
         settings.whisper_cpu_fallback_model_size,

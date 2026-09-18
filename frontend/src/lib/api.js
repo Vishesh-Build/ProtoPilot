@@ -44,10 +44,14 @@ async function refreshSession() {
   if (!_refreshInFlight) {
     _refreshInFlight = (async () => {
       try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 4000);
         const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
           method: "POST",
           credentials: "include",
+          signal: controller.signal,
         });
+        clearTimeout(tid);
         if (!res.ok) return false;
         return true;
       } catch {
@@ -73,35 +77,57 @@ const _NO_REFRESH = new Set([
 ]);
 
 async function request(path, options = {}) {
+  const timeoutMs = options.timeout ?? 15000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = options.signal || controller.signal;
+
   let res;
   try {
+    const { timeout, ...fetchOptions } = options;
     res = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      ...options,
+      signal,
+      ...fetchOptions,
     });
-  } catch {
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new ApiError("Server request timed out — please try again.", 408);
+    }
     throw new ApiError(
       "Can't reach the server — check your connection and that the backend is running.",
       0
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   // Access token expired mid-session: silently renew once and replay.
   if (res.status === 401 && !_NO_REFRESH.has(path)) {
     const renewed = await refreshSession();
     if (renewed) {
+      const replayController = new AbortController();
+      const replayTimeoutId = setTimeout(() => replayController.abort(), timeoutMs);
+      const replaySignal = options.signal || replayController.signal;
       try {
+        const { timeout, ...fetchOptions } = options;
         res = await fetch(`${API_BASE_URL}${path}`, {
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          ...options,
+          signal: replaySignal,
+          ...fetchOptions,
         });
-      } catch {
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new ApiError("Server request timed out — please try again.", 408);
+        }
         throw new ApiError(
           "Can't reach the server — check your connection and that the backend is running.",
           0
         );
+      } finally {
+        clearTimeout(replayTimeoutId);
       }
     }
   }
@@ -138,7 +164,7 @@ export const authApi = {
 
   logout: () => request("/auth/logout", { method: "POST" }),
 
-  me: () => request("/auth/me"),
+  me: (options = {}) => request("/auth/me", { timeout: 3000, ...options }),
 
   forgotPassword: (email) =>
     request("/auth/forgot-password", {

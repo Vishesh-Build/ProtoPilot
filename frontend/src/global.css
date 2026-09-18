@@ -37,12 +37,27 @@ html,
 body {
   margin: 0;
   padding: 0;
+  background-color: #0b0f19;
+  color: #f3f4f6;
 }
 
 html,
 body,
 #root {
   min-height: 100%;
+}
+
+@keyframes pp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pp-splash-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: pp-spin 0.8s linear infinite;
 }
 
 *,

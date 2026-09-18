@@ -59,8 +59,8 @@ ipcMain.handle("protopilot:write-clipboard", (_event, text) => {
 // for an installed NSIS build talking to GitHub Releases.
 let autoUpdater = null;
 
-const APP_PORT = 5173;
-const APP_URL = `http://localhost:${APP_PORT}`;
+let appPort = 5173;
+let appUrl = `http://localhost:${appPort}`;
 
 /* ------------------------------------------------------------
    Backend API URL resolution (runtime, not build time).
@@ -170,7 +170,6 @@ ipcMain.handle("protopilot:get-screen-sources", async () => {
 // Origins the app window is allowed to navigate to directly.
 // Everything else opens in the system browser via shell.openExternal.
 const ALLOWED_NAVIGATION_ORIGINS = [
-  APP_URL,
   API_BASE_URL, // the configured backend — wherever it actually is
   "https://accounts.google.com",
   "https://oauth2.googleapis.com",
@@ -182,6 +181,9 @@ const ALLOWED_NAVIGATION_ORIGINS = [
 function isAllowedOrigin(urlString) {
   try {
     const url = new URL(urlString);
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return true;
+    }
     return ALLOWED_NAVIGATION_ORIGINS.some((allowed) => urlString.startsWith(allowed) || url.origin === new URL(allowed).origin);
   } catch {
     return false;
@@ -210,7 +212,7 @@ const MIME_TYPES = {
  */
 function startProductionServer(distDir) {
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
+    const handler = (req, res) => {
       let filePath = path.join(distDir, decodeURIComponent(req.url.split("?")[0]));
       if (!filePath.startsWith(distDir)) {
         res.writeHead(403);
@@ -225,18 +227,30 @@ function startProductionServer(distDir) {
         res.writeHead(200, { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" });
         fs.createReadStream(filePath).pipe(res);
       });
-    });
+    };
+
+    const server = http.createServer(handler);
 
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
-        console.warn(`[server] Port ${APP_PORT} already in use; reusing existing server.`);
-        resolve(null);
+        console.warn(`[server] Port ${appPort} already in use; binding to an ephemeral free port...`);
+        const fallbackServer = http.createServer(handler);
+        fallbackServer.listen(0, "127.0.0.1", () => {
+          const addr = fallbackServer.address();
+          appPort = addr.port;
+          appUrl = `http://localhost:${appPort}`;
+          console.log(`[server] Production server bound to dynamic port ${appPort}: ${appUrl}`);
+          resolve(fallbackServer);
+        });
       } else {
         reject(err);
       }
     });
 
-    server.listen(APP_PORT, "127.0.0.1", () => resolve(server));
+    server.listen(appPort, "127.0.0.1", () => {
+      appUrl = `http://localhost:${appPort}`;
+      resolve(server);
+    });
   });
 }
 
@@ -332,8 +346,25 @@ async function createWindow() {
 
   mainWindow = win;
 
+  // Show window when ready, with safety timer so window is never stuck hidden
+  const showTimer = setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) {
+      win.show();
+    }
+  }, 1500);
+
   win.once("ready-to-show", () => {
+    clearTimeout(showTimer);
     win.show();
+  });
+
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.warn(`[main] Failed to load ${validatedURL}: ${errorCode} (${errorDescription}). Retrying in 1s...`);
+    setTimeout(() => {
+      if (!win.isDestroyed()) {
+        win.loadURL(appUrl).catch((e) => console.error("[main] Retry win.loadURL failed:", e));
+      }
+    }, 1000);
   });
 
   win.setMenuBarVisibility(false);
@@ -388,12 +419,12 @@ async function createWindow() {
   // port 5173) before launching Electron — see package.json.
 
   try {
-    await win.loadURL(APP_URL);
+    await win.loadURL(appUrl);
   } catch (err) {
     console.error("[main] Initial win.loadURL failed, retrying in 1s:", err);
     setTimeout(() => {
       if (!win.isDestroyed()) {
-        win.loadURL(APP_URL).catch((e) => console.error("[main] Retry win.loadURL failed:", e));
+        win.loadURL(appUrl).catch((e) => console.error("[main] Retry win.loadURL failed:", e));
       }
     }, 1000);
   }

@@ -7,13 +7,46 @@ session state (transcript, requirements, agent outputs) stays where it is
 """
 
 from collections.abc import AsyncGenerator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
-engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+
+def _build_async_engine():
+    db_url = str(settings.database_url)
+    connect_args = {}
+
+    # Handle Postgres / Neon SSL requirements for asyncpg
+    if "postgres" in db_url:
+        parts = urlsplit(db_url)
+        scheme = parts.scheme
+        if scheme in ("postgres", "postgresql") or scheme.startswith("postgresql+"):
+            scheme = "postgresql+asyncpg"
+
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        sslmode_val = query.pop("sslmode", None)
+        ssl_val = query.get("ssl")
+
+        # asyncpg requires ssl=require, not sslmode=require
+        if "neon.tech" in parts.netloc or sslmode_val == "require" or ssl_val in ("require", "true", "1"):
+            query["ssl"] = "require"
+            connect_args["ssl"] = "require"
+
+        new_query = urlencode(query)
+        db_url = urlunsplit((scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+    return create_async_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args=connect_args,
+    )
+
+
+engine = _build_async_engine()
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

@@ -81,6 +81,14 @@ export default function App() {
   useEffect(() => {
     if (initialToken) return;
     let cancelled = false;
+
+    // Strict safety timer: never block app startup for more than 2000ms
+    const safetyTimer = setTimeout(() => {
+      if (!cancelled) {
+        setCheckingSession(false);
+      }
+    }, 2000);
+
     authApi
       .me()
       .then((user) => {
@@ -90,10 +98,15 @@ export default function App() {
       })
       .catch(() => {})
       .finally(() => {
+        clearTimeout(safetyTimer);
         if (!cancelled) setCheckingSession(false);
         if (!cancelled && cameFromOAuth) window.history.replaceState({}, "", window.location.pathname);
       });
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+      clearTimeout(safetyTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -183,7 +196,47 @@ export default function App() {
     setPage("dashboard");
   };
 
-  if (checkingSession) return null;
+  if (checkingSession) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          backgroundColor: "#0b0f19",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#f3f4f6",
+          gap: "14px",
+          userSelect: "none",
+        }}
+      >
+        <div
+          style={{
+            width: "52px",
+            height: "52px",
+            borderRadius: "14px",
+            background: "linear-gradient(135deg, #4F46E5, #06B6D4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 0 28px rgba(79, 70, 229, 0.45)",
+          }}
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        </div>
+        <div style={{ fontSize: "19px", fontWeight: "600", letterSpacing: "-0.02em", color: "#ffffff" }}>
+          ProtoPilot
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#9ca3af", fontSize: "13px" }}>
+          <div className="pp-splash-spinner" />
+          <span>Starting ProtoPilot...</span>
+        </div>
+      </div>
+    );
+  }
 
   const liveCallProps = {
     meetingId: activeMeetingId,
