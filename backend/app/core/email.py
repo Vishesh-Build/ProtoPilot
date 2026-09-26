@@ -49,6 +49,16 @@ async def _send_via_resend(to_email: str, subject: str, html_content: str, text_
         )
         if resp.status_code >= 400:
             logger.error("Resend API error: %s", resp.text)
+            try:
+                err_data = resp.json()
+                msg = err_data.get("message", "")
+                if "only send testing emails to your own email address" in msg:
+                    raise EmailSendError(
+                        f"Resend Sandbox Mode: Free Resend only allows sending to the account owner's email ({to_email} is not the owner). "
+                        "To send to any recipient, verify your domain at resend.com/domains or use Brevo."
+                    )
+            except (ValueError, KeyError):
+                pass
             raise EmailSendError(f"Email service rejected request: {resp.text[:200]}")
 
 
