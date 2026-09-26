@@ -243,8 +243,19 @@ function startProductionServer(distDir) {
           filePath = path.join(distDir, "index.html");
         }
         const ext = path.extname(filePath);
-        res.writeHead(200, { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" });
-        fs.createReadStream(filePath).pipe(res);
+        fs.readFile(filePath, (readErr, data) => {
+          if (readErr) {
+            console.error("[server] Failed to read static file:", filePath, readErr);
+            res.writeHead(500, { "Content-Type": "text/plain" });
+            res.end("Error loading file");
+            return;
+          }
+          res.writeHead(200, {
+            "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end(data);
+        });
       });
     };
 
