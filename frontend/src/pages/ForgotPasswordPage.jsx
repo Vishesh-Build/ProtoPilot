@@ -182,12 +182,11 @@ const styles = `
   }
 `;
 
-export default function ForgotPasswordPage({ onBackToLogin, onDirectReset }) {
+export default function ForgotPasswordPage({ onBackToLogin }) {
   const [email, setEmail] = useState("");
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
-  const [resetToken, setResetToken] = useState(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [error, setError] = useState("");
 
@@ -209,11 +208,8 @@ export default function ForgotPasswordPage({ onBackToLogin, onDirectReset }) {
     setSubmitting(true);
     setError("");
     try {
-      const res = await authApi.forgotPassword(emailClean);
+      await authApi.forgotPassword(emailClean);
       setSent(true);
-      if (res && res.reset_token) {
-        setResetToken(res.reset_token);
-      }
       setCooldownSeconds(60);
     } catch (err) {
       setError(err.message || "Couldn't send the reset link — please try again.");
@@ -308,32 +304,11 @@ export default function ForgotPasswordPage({ onBackToLogin, onDirectReset }) {
             <>
               <div className="confirm-icon-wrap"><MailCheck size={24} /></div>
               <div className="auth-form-head">
-                <h2 className="auth-title auth-display">
-                  {resetToken ? "Reset Link Ready" : "Check your inbox"}
-                </h2>
+                <h2 className="auth-title auth-display">Check your inbox</h2>
                 <p className="auth-subtitle">
-                  {resetToken ? (
-                    <>
-                      A secure reset link was generated for <b>{email}</b>. You can set your new password directly below:
-                    </>
-                  ) : (
-                    <>
-                      We've sent a password reset link to <b>{email}</b>. It'll expire in 30 minutes.
-                    </>
-                  )}
+                  We've sent a password reset link to <b>{email}</b>. It'll expire in 30 minutes.
                 </p>
               </div>
-
-              {resetToken && (
-                <button
-                  type="button"
-                  className="auth-submit"
-                  style={{ marginBottom: 12 }}
-                  onClick={() => onDirectReset?.(resetToken)}
-                >
-                  Set New Password Now <ArrowRight size={15} />
-                </button>
-              )}
 
               <button className="auth-submit ghost" onClick={onBackToLogin}>
                 Back to log in

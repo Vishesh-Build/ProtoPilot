@@ -156,28 +156,19 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
 
     reset_link = f"{settings.password_reset_url_base}?token={raw_token}"
 
-    email_delivered = False
     try:
         await send_password_reset_email(user.email, reset_link)
-        email_delivered = True
-    except (EmailNotConfigured, EmailSendError, Exception) as e:
-        logger.warning(
-            "password reset email delivery failed or blocked by network/host: %s. "
-            "Providing secure reset link fallback for %s: %s",
-            e,
-            user.email,
-            reset_link,
-        )
+    except EmailNotConfigured as e:
+        logger.error("password reset requested but email isn't configured: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Password reset email could not be sent — email service is not configured on the server.",
+        ) from e
+    except EmailSendError as e:
+        logger.error("password reset email failed to send: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
-    return MessageResponse(
-        message=(
-            "If an account with that email exists, a reset link has been sent."
-            if email_delivered
-            else "A reset link has been generated. Use the link below to set your new password."
-        ),
-        reset_token=raw_token if not email_delivered else None,
-        reset_url=reset_link if not email_delivered else None,
-    )
+    return generic_response
 
 
 @router.post("/reset-password", response_model=MessageResponse)

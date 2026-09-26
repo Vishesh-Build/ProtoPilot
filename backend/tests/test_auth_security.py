@@ -118,12 +118,10 @@ def test_in_memory_rate_limiter():
     assert "Too many attempts" in exc_info.value.detail
 
 
-def test_message_response_fallback_fields():
+def test_message_response_strict():
     from app.schemas.auth import MessageResponse
     resp = MessageResponse(
-        message="A reset link has been generated.",
-        reset_token="test_token_123",
-        reset_url="http://localhost:5173/reset-password?token=test_token_123",
+        message="If an account with that email exists, a reset link has been sent.",
     )
-    assert resp.reset_token == "test_token_123"
-    assert "token=test_token_123" in resp.reset_url
+    assert resp.message == "If an account with that email exists, a reset link has been sent."
+    assert not hasattr(resp, "reset_token") or resp.model_dump().get("reset_token") is None

@@ -277,6 +277,10 @@ class Settings(BaseSettings):
     # SMTP relay, Mailgun SMTP, etc.) — this backend doesn't fake-send email;
     # if these aren't configured, /auth/forgot-password will return a clear
     # 500 instead of pretending an email went out.
+    # HTTP Email APIs (bypass Render free-tier SMTP port 25/465/587 blocks):
+    resend_api_key: str | None = None
+    brevo_api_key: str | None = None
+
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None

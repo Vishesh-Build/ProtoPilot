@@ -294,15 +294,7 @@ export default function App() {
         return <RegisterPage onRegister={handleLoggedIn} onGoLogin={() => setPage("login")} />;
 
       case "forgot":
-        return (
-          <ForgotPasswordPage
-            onBackToLogin={() => setPage("login")}
-            onDirectReset={(token) => {
-              setResetToken(token);
-              setPage("reset");
-            }}
-          />
-        );
+        return <ForgotPasswordPage onBackToLogin={() => setPage("login")} />;
 
       case "reset":
         return <ResetPasswordPage token={resetToken} onBackToLogin={goToLogin} onResetComplete={goToLogin} />;
