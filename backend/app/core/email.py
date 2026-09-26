@@ -63,7 +63,12 @@ async def _send_via_resend(to_email: str, subject: str, html_content: str, text_
 
 
 async def _send_via_brevo(to_email: str, subject: str, html_content: str, text_content: str) -> None:
-    sender_email = settings.smtp_username or "no-reply@protopilot.app"
+    sender_email = (
+        settings.brevo_sender_email
+        or settings.smtp_username
+        or (settings.smtp_from_address if "@" in settings.smtp_from_address and not settings.smtp_from_address.endswith("@protopilot.app") else None)
+        or "visheshbarot7@gmail.com"
+    )
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             "https://api.brevo.com/v3/smtp/email",
@@ -80,7 +85,14 @@ async def _send_via_brevo(to_email: str, subject: str, html_content: str, text_c
             },
         )
         if resp.status_code >= 400:
-            logger.error("Brevo API error: %s", resp.text)
+            logger.error("Brevo API error (%d): %s", resp.status_code, resp.text)
+            try:
+                err_data = resp.json()
+                msg = err_data.get("message", "")
+                if msg:
+                    raise EmailSendError(f"Brevo error: {msg}")
+            except (ValueError, KeyError):
+                pass
             raise EmailSendError(f"Email service rejected request: {resp.text[:200]}")
 
 
@@ -109,7 +121,7 @@ async def _send_via_smtp(to_email: str, subject: str, text_content: str) -> None
         logger.error("SMTP delivery to %s timed out after %.0fs", to_email, _SEND_TIMEOUT_SECONDS)
         raise EmailSendError(
             "Email server timed out. Note: Render free tier blocks outbound SMTP ports 25, 465, and 587. "
-            "Set RESEND_API_KEY in Render to send emails over HTTPS Port 443."
+            "Set BREVO_API_KEY or RESEND_API_KEY in Render to send emails over HTTPS Port 443."
         ) from e
     except aiosmtplib.SMTPAuthenticationError as e:
         logger.error("SMTP auth rejected for %s: %s", to_email, e)
@@ -139,14 +151,14 @@ async def send_password_reset_email(to_email: str, reset_link: str) -> None:
         f"</div>"
     )
 
-    if settings.resend_api_key:
-        await _send_via_resend(to_email, subject, html_content, text_content)
-        logger.info("Password reset email sent to %s via Resend API", to_email)
-        return
-
     if settings.brevo_api_key:
         await _send_via_brevo(to_email, subject, html_content, text_content)
         logger.info("Password reset email sent to %s via Brevo API", to_email)
+        return
+
+    if settings.resend_api_key:
+        await _send_via_resend(to_email, subject, html_content, text_content)
+        logger.info("Password reset email sent to %s via Resend API", to_email)
         return
 
     if settings.smtp_host and settings.smtp_username and settings.smtp_password:

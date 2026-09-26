@@ -280,6 +280,7 @@ class Settings(BaseSettings):
     # HTTP Email APIs (bypass Render free-tier SMTP port 25/465/587 blocks):
     resend_api_key: str | None = None
     brevo_api_key: str | None = None
+    brevo_sender_email: str | None = None
 
     smtp_host: str | None = None
     smtp_port: int = 587
