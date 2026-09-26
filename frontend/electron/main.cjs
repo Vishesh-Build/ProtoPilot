@@ -101,7 +101,7 @@ let appUrl = `http://localhost:${appPort}`;
 // "Can't reach the server". The renderer reads THIS value (via preload), not the
 // vite-baked VITE_API_BASE_URL, so this is the one that actually matters for the
 // desktop app.
-const DEFAULT_API_BASE_URL = "https://protopilot-c60r.onrender.com";
+const DEFAULT_API_BASE_URL = "https://protopilot-0ku3.onrender.com";
 
 function configPath() {
   return path.join(app.getPath("userData"), "config.json");
@@ -112,7 +112,12 @@ function readSavedApiBaseUrl() {
     const raw = fs.readFileSync(configPath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.apiBaseUrl === "string" && /^https?:\/\//.test(parsed.apiBaseUrl)) {
-      return parsed.apiBaseUrl.replace(/\/+$/, "");
+      const url = parsed.apiBaseUrl.replace(/\/+$/, "");
+      // Discard stale URL from the suspended old Render instance so the app switches immediately
+      if (url.includes("protopilot-c60r.onrender.com")) {
+        return null;
+      }
+      return url;
     }
   } catch {
     /* no config yet, or unreadable — fall through */

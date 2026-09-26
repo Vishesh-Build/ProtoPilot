@@ -14,7 +14,7 @@ export const API_BASE_URL =
     window.protopilotDesktop &&
     window.protopilotDesktop.apiBaseUrl) || // Electron: runtime-configurable (main.cjs)
   import.meta.env.VITE_API_BASE_URL || // plain browser/Vite build
-  "http://localhost:8000";
+  "https://protopilot-0ku3.onrender.com";
 
 class ApiError extends Error {
   constructor(message, status) {
