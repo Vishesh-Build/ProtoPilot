@@ -155,7 +155,10 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
     )
     await db.commit()
 
-    reset_link = f"{settings.password_reset_url_base}?token={raw_token}"
+    base_url = settings.password_reset_url_base
+    if not base_url or "localhost" in base_url or "127.0.0.1" in base_url:
+        base_url = "https://protopilot-0ku3.onrender.com/auth/reset-password"
+    reset_link = f"{base_url}?token={raw_token}"
 
     try:
         await send_password_reset_email(user.email, reset_link)
