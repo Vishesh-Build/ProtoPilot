@@ -4,7 +4,7 @@ import pathlib
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.api import admin, auth, exports, health, livekit_router, llm_test, meetings, oauth, requirements
 from app.config import settings
@@ -97,3 +97,9 @@ app.include_router(requirements.router)
 app.include_router(generate.router)
 app.include_router(meetings.router)
 app.include_router(exports.router)
+ 
+ 
+@app.get("/reset-password")
+async def root_reset_password_redirect(token: str = ""):
+    return RedirectResponse(url=f"/auth/reset-password?token={token}")
+

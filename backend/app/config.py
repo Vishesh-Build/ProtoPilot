@@ -287,9 +287,8 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_from_address: str = "no-reply@protopilot.app"
-    # Where the reset link should point — your Electron app's local server
-    # or a hosted "reset password" page that then calls /auth/reset-password.
-    password_reset_url_base: str = "http://localhost:5173/reset-password"
+    # Where the reset link should point — hosted Render page so it works on any device/browser
+    password_reset_url_base: str = "https://protopilot-0ku3.onrender.com/auth/reset-password"
 
     # ---- OAuth (Google / GitHub) ----
     google_client_id: str | None = None
