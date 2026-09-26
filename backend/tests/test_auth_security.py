@@ -116,3 +116,14 @@ def test_in_memory_rate_limiter():
         limiter.check(key)
     assert exc_info.value.status_code == 429
     assert "Too many attempts" in exc_info.value.detail
+
+
+def test_message_response_fallback_fields():
+    from app.schemas.auth import MessageResponse
+    resp = MessageResponse(
+        message="A reset link has been generated.",
+        reset_token="test_token_123",
+        reset_url="http://localhost:5173/reset-password?token=test_token_123",
+    )
+    assert resp.reset_token == "test_token_123"
+    assert "token=test_token_123" in resp.reset_url

@@ -14,7 +14,7 @@ from app.config import settings
 
 logger = logging.getLogger("protopilot.email")
 
-_SEND_TIMEOUT_SECONDS = 15.0
+_SEND_TIMEOUT_SECONDS = 4.0
 
 
 class EmailNotConfigured(RuntimeError):
@@ -47,6 +47,7 @@ async def send_password_reset_email(to_email: str, reset_link: str) -> None:
         "If you didn't request this, you can safely ignore this email."
     )
 
+    is_ssl_port = settings.smtp_port == 465
     try:
         await asyncio.wait_for(
             aiosmtplib.send(
@@ -58,7 +59,8 @@ async def send_password_reset_email(to_email: str, reset_link: str) -> None:
                 # spaces for readability ("xfnz iptn xldc dlfs") but reject
                 # auth if you send them with the spaces still in — strip them.
                 password=settings.smtp_password.replace(" ", ""),
-                start_tls=True,
+                use_tls=is_ssl_port,
+                start_tls=not is_ssl_port,
             ),
             timeout=_SEND_TIMEOUT_SECONDS,
         )
