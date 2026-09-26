@@ -148,7 +148,25 @@ const styles = `
     background: #FDF3F3; border: 1px solid #F5D9D9; border-radius: 12px;
     padding: 10px 12px; margin-bottom: 18px; font-size: 12px; color: #B23A3A; line-height: 1.5;
   }
-  .auth-rule-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 18px; }
+  .auth-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .auth-caps-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; color: #B45309; background: #FEF3C7;
+    border: 1px solid #FDE68A; padding: 2px 7px; border-radius: 6px;
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+
+  .pw-meter {
+    height: 4px; border-radius: 99px; background: #ECEEF5; margin-top: 8px;
+    overflow: hidden; display: flex; gap: 4px;
+  }
+  .pw-meter-bar { height: 100%; border-radius: 99px; transition: all 0.25s ease; }
+  .pw-meter-bar.weak { width: 25%; background: #EF4444; }
+  .pw-meter-bar.fair { width: 50%; background: #F59E0B; }
+  .pw-meter-bar.good { width: 75%; background: #3B82F6; }
+  .pw-meter-bar.strong { width: 100%; background: #10B981; }
+
+  .auth-rule-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 18px; }
   .auth-rule { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #9599AA; }
   .auth-rule.met { color: #17A56A; }
 
@@ -168,6 +186,7 @@ function checkRules(pw) {
     length: pw.length >= 8,
     case: /[a-z]/.test(pw) && /[A-Z]/.test(pw),
     number: /[0-9]/.test(pw),
+    symbol: /[^A-Za-z0-9]/.test(pw),
   };
 }
 
@@ -175,13 +194,22 @@ export default function ResetPasswordPage({ token, onBackToLogin, onResetComplet
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [focused, setFocused] = useState(null);
+  const [capsLockOn, setCapsLockOn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
 
+  const handleKeyEvent = (e) => {
+    if (e.getModifierState) {
+      setCapsLockOn(e.getModifierState("CapsLock"));
+    }
+  };
+
   const rules = checkRules(password);
-  const pwValid = Object.values(rules).every(Boolean);
+  const score = Object.values(rules).filter(Boolean).length;
+  const pwValid = score === 4;
   const confirmValid = confirm.length > 0 && confirm === password;
   const canSubmit = Boolean(token) && pwValid && confirmValid && !submitting;
 
@@ -274,7 +302,12 @@ export default function ResetPasswordPage({ token, onBackToLogin, onResetComplet
 
               <form onSubmit={handleSubmit}>
                 <div className="auth-field">
-                  <label className="auth-label">New password</label>
+                  <div className="auth-label-row">
+                    <label className="auth-label" style={{ margin: 0 }}>New password</label>
+                    {capsLockOn && (
+                      <span className="auth-caps-badge">Caps Lock ON</span>
+                    )}
+                  </div>
                   <div className={`auth-input-wrap ${focused === "password" ? "focused" : ""}`}>
                     <Lock size={15} className="auth-input-icon" />
                     <input
@@ -283,30 +316,53 @@ export default function ResetPasswordPage({ token, onBackToLogin, onResetComplet
                       placeholder="Enter a new password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onKeyDown={handleKeyEvent}
+                      onKeyUp={handleKeyEvent}
                       onFocus={() => setFocused("password")}
-                      onBlur={() => setFocused(null)}
+                      onBlur={() => {
+                        setFocused(null);
+                        setCapsLockOn(false);
+                      }}
                       autoComplete="new-password"
                     />
                     <div className="auth-eye-btn" onClick={() => setShowPassword((s) => !s)}>
                       {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                     </div>
                   </div>
+                  {password.length > 0 && (
+                    <div className="pw-meter">
+                      <div className={`pw-meter-bar ${score === 1 ? "weak" : score === 2 ? "fair" : score === 3 ? "good" : score === 4 ? "strong" : "weak"}`} />
+                    </div>
+                  )}
                 </div>
 
                 <div className="auth-field">
-                  <label className="auth-label">Confirm new password</label>
+                  <div className="auth-label-row">
+                    <label className="auth-label" style={{ margin: 0 }}>Confirm new password</label>
+                    {capsLockOn && (
+                      <span className="auth-caps-badge">Caps Lock ON</span>
+                    )}
+                  </div>
                   <div className={`auth-input-wrap ${focused === "confirm" ? "focused" : ""}`}>
                     <Lock size={15} className="auth-input-icon" />
                     <input
                       className="auth-input"
-                      type={showPassword ? "text" : "password"}
+                      type={showConfirm ? "text" : "password"}
                       placeholder="Re-enter the new password"
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
+                      onKeyDown={handleKeyEvent}
+                      onKeyUp={handleKeyEvent}
                       onFocus={() => setFocused("confirm")}
-                      onBlur={() => setFocused(null)}
+                      onBlur={() => {
+                        setFocused(null);
+                        setCapsLockOn(false);
+                      }}
                       autoComplete="new-password"
                     />
+                    <div className="auth-eye-btn" onClick={() => setShowConfirm((s) => !s)}>
+                      {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </div>
                   </div>
                 </div>
 
@@ -314,6 +370,7 @@ export default function ResetPasswordPage({ token, onBackToLogin, onResetComplet
                   <div className={`auth-rule ${rules.length ? "met" : ""}`}><Check size={12} /> At least 8 characters</div>
                   <div className={`auth-rule ${rules.case ? "met" : ""}`}><Check size={12} /> Upper &amp; lowercase letters</div>
                   <div className={`auth-rule ${rules.number ? "met" : ""}`}><Check size={12} /> At least one number</div>
+                  <div className={`auth-rule ${rules.symbol ? "met" : ""}`}><Check size={12} /> At least one symbol (!@#$%...)</div>
                 </div>
 
                 <button type="submit" className="auth-submit" disabled={!canSubmit}>

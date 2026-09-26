@@ -187,10 +187,20 @@ export default function ForgotPasswordPage({ onBackToLogin }) {
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [error, setError] = useState("");
 
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const canSubmit = emailValid && !submitting;
+  React.useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const interval = setInterval(() => {
+      setCooldownSeconds((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [cooldownSeconds]);
+
+  const emailClean = email.trim().toLowerCase();
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean);
+  const canSubmit = emailValid && !submitting && cooldownSeconds === 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -198,12 +208,9 @@ export default function ForgotPasswordPage({ onBackToLogin }) {
     setSubmitting(true);
     setError("");
     try {
-      // Backend always returns the same generic success message whether or
-      // not the account exists — that's intentional (see README_AUTH.md),
-      // not a bug. A thrown error here means something actually went wrong
-      // (rate limited, or SMTP isn't configured on the server yet).
-      await authApi.forgotPassword(email);
+      await authApi.forgotPassword(emailClean);
       setSent(true);
+      setCooldownSeconds(60);
     } catch (err) {
       setError(err.message || "Couldn't send the reset link — please try again.");
     } finally {
@@ -309,7 +316,11 @@ export default function ForgotPasswordPage({ onBackToLogin }) {
 
               <div className="resend-row">
                 Didn't get it? Check spam, or{" "}
-                <span className="auth-link" onClick={() => setSent(false)}>try a different email</span>
+                {cooldownSeconds > 0 ? (
+                  <span style={{ color: "#767A8C", fontWeight: 600 }}>resend available in {cooldownSeconds}s</span>
+                ) : (
+                  <span className="auth-link" onClick={() => setSent(false)}>try a different email or resend</span>
+                )}
               </div>
             </>
           )}

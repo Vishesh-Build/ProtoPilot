@@ -173,6 +173,21 @@ const styles = `
 
   .auth-footer-text { text-align: center; font-size: 12.5px; color: #767A8C; margin-top: 24px; }
 
+  .auth-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .auth-caps-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; color: #B45309; background: #FEF3C7;
+    border: 1px solid #FDE68A; padding: 2px 7px; border-radius: 6px;
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+  .auth-lockout-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: #FEF2F2; border: 1.5px solid #FCA5A5; border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 18px; font-size: 12.5px; color: #991B1B; line-height: 1.5;
+    font-weight: 600;
+  }
+  .auth-lockout-time { font-weight: 800; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+
   .auth-banner {
     display: flex; align-items: flex-start; gap: 9px;
     background: #FDF3F3; border: 1px solid #F5D9D9; border-radius: 12px;
@@ -198,10 +213,28 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
   const [focused, setFocused] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [capsLockOn, setCapsLockOn] = useState(false);
   const [error, setError] = useState("");
 
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const canSubmit = emailValid && password.length >= 8 && !submitting;
+  React.useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+    const interval = setInterval(() => {
+      setLockoutSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutSeconds]);
+
+  const handleKeyEvent = (e) => {
+    if (e.getModifierState) {
+      setCapsLockOn(e.getModifierState("CapsLock"));
+    }
+  };
+
+  const emailClean = email.trim().toLowerCase();
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean);
+  const isLocked = lockoutSeconds > 0;
+  const canSubmit = emailValid && password.length >= 8 && !submitting && !isLocked;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -209,11 +242,18 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
     setSubmitting(true);
     setError("");
     try {
-      const user = await authApi.login(email, password);
+      const user = await authApi.login(emailClean, password);
+      setFailedAttempts(0);
       onLogin?.(user);
     } catch (err) {
-      setFailedAttempts((n) => n + 1);
-      setError(err.message || "Login failed — please try again.");
+      const nextFails = failedAttempts + 1;
+      setFailedAttempts(nextFails);
+      if (nextFails >= 5) {
+        setLockoutSeconds(30);
+        setError("Too many failed attempts. Login is temporarily locked for 30 seconds.");
+      } else {
+        setError(err.message || "Invalid email or password.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -263,18 +303,29 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
             <p className="auth-subtitle">Enter your details to access your workspace.</p>
           </div>
 
-          {failedAttempts >= 3 && (
+          {isLocked ? (
+            <div className="auth-lockout-banner">
+              <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div>Login locked due to repeated failed attempts.</div>
+                <div style={{ fontSize: 11.5, opacity: 0.9, marginTop: 2 }}>
+                  Please wait <span className="auth-lockout-time">{lockoutSeconds}s</span> before retrying, or reset your password below.
+                </div>
+              </div>
+            </div>
+          ) : error ? (
             <div className="auth-banner">
               <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>Too many failed attempts. You can try again, but consider resetting your password if you're unsure.</span>
+              <div>
+                <span>{error}</span>
+                {failedAttempts >= 3 && (
+                  <div style={{ marginTop: 4, fontSize: 11.5, opacity: 0.9 }}>
+                    If you are unsure of your password, consider clicking "Forgot password?" below.
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-          {error && !failedAttempts && (
-            <div className="auth-banner">
-              <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>{error}</span>
-            </div>
-          )}
+          ) : null}
 
           <form onSubmit={handleSubmit}>
             <div className="auth-field">
@@ -286,6 +337,7 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
                   type="email"
                   placeholder="you@company.com"
                   value={email}
+                  disabled={isLocked || submitting}
                   onChange={(e) => setEmail(e.target.value)}
                   onFocus={() => setFocused("email")}
                   onBlur={() => setFocused(null)}
@@ -295,7 +347,12 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
             </div>
 
             <div className="auth-field">
-              <label className="auth-label">Password</label>
+              <div className="auth-label-row">
+                <label className="auth-label" style={{ margin: 0 }}>Password</label>
+                {capsLockOn && (
+                  <span className="auth-caps-badge">Caps Lock ON</span>
+                )}
+              </div>
               <div className={`auth-input-wrap ${focused === "password" ? "focused" : ""}`}>
                 <Lock size={15} className="auth-input-icon" />
                 <input
@@ -303,9 +360,15 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
+                  disabled={isLocked || submitting}
                   onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={handleKeyEvent}
+                  onKeyUp={handleKeyEvent}
                   onFocus={() => setFocused("password")}
-                  onBlur={() => setFocused(null)}
+                  onBlur={() => {
+                    setFocused(null);
+                    setCapsLockOn(false);
+                  }}
                   autoComplete="current-password"
                 />
                 <div className="auth-eye-btn" onClick={() => setShowPassword((s) => !s)}>
@@ -315,7 +378,7 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
             </div>
 
             <div className="auth-row">
-              <div className="auth-remember" onClick={() => setRemember((r) => !r)}>
+              <div className="auth-remember" onClick={() => !isLocked && setRemember((r) => !r)}>
                 <span className={`auth-checkbox ${remember ? "checked" : ""}`}>
                   {remember && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3.5L3.2 5.7L8 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                 </span>
@@ -325,7 +388,11 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
             </div>
 
             <button type="submit" className="auth-submit" disabled={!canSubmit}>
-              {submitting ? "Logging in…" : "Log in"} <ArrowRight size={15} />
+              {isLocked
+                ? `Locked (${lockoutSeconds}s)`
+                : submitting
+                ? "Logging in…"
+                : "Log in"} <ArrowRight size={15} />
             </button>
           </form>
 

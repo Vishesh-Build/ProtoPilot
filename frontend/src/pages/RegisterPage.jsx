@@ -180,6 +180,24 @@ const styles = `
 
   .auth-footer-text { text-align: center; font-size: 12.5px; color: #767A8C; margin-top: 22px; }
 
+  .auth-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+  .auth-caps-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; color: #B45309; background: #FEF3C7;
+    border: 1px solid #FDE68A; padding: 2px 7px; border-radius: 6px;
+    letter-spacing: 0.02em; text-transform: uppercase;
+  }
+
+  .pw-meter {
+    height: 4px; border-radius: 99px; background: #ECEEF5; margin-top: 8px;
+    overflow: hidden; display: flex; gap: 4px;
+  }
+  .pw-meter-bar { height: 100%; border-radius: 99px; transition: all 0.25s ease; }
+  .pw-meter-bar.weak { width: 25%; background: #EF4444; }
+  .pw-meter-bar.fair { width: 50%; background: #F59E0B; }
+  .pw-meter-bar.good { width: 75%; background: #3B82F6; }
+  .pw-meter-bar.strong { width: 100%; background: #10B981; }
+
   .auth-banner {
     display: flex; align-items: flex-start; gap: 9px;
     background: #FDF3F3; border: 1px solid #F5D9D9; border-radius: 12px;
@@ -210,14 +228,24 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [agree, setAgree] = useState(false);
   const [focused, setFocused] = useState(null);
+  const [capsLockOn, setCapsLockOn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const handleKeyEvent = (e) => {
+    if (e.getModifierState) {
+      setCapsLockOn(e.getModifierState("CapsLock"));
+    }
+  };
+
+  const cleanName = name.trim();
+  const cleanEmail = email.trim().toLowerCase();
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
   const rules = checkRules(password);
-  const pwValid = Object.values(rules).every(Boolean);
+  const score = Object.values(rules).filter(Boolean).length;
+  const pwValid = score === 4;
   const confirmValid = confirm.length > 0 && confirm === password;
-  const canSubmit = name.trim().length > 1 && emailValid && pwValid && confirmValid && agree && !submitting;
+  const canSubmit = cleanName.length >= 2 && emailValid && pwValid && confirmValid && agree && !submitting;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -225,7 +253,7 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
     setSubmitting(true);
     setError("");
     try {
-      const user = await authApi.register(name.trim(), email, password);
+      const user = await authApi.register(cleanName, cleanEmail, password);
       onRegister?.(user);
     } catch (err) {
       setError(err.message || "Registration failed — please try again.");
@@ -319,7 +347,12 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
             </div>
 
             <div className="auth-field">
-              <label className="auth-label">Password</label>
+              <div className="auth-label-row">
+                <label className="auth-label" style={{ margin: 0 }}>Password</label>
+                {capsLockOn && (
+                  <span className="auth-caps-badge">Caps Lock ON</span>
+                )}
+              </div>
               <div className={`auth-input-wrap ${focused === "password" ? "focused" : ""}`}>
                 <Lock size={15} className="auth-input-icon" />
                 <input
@@ -328,24 +361,39 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
                   placeholder="Create a strong password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={handleKeyEvent}
+                  onKeyUp={handleKeyEvent}
                   onFocus={() => setFocused("password")}
-                  onBlur={() => setFocused(null)}
+                  onBlur={() => {
+                    setFocused(null);
+                    setCapsLockOn(false);
+                  }}
                   autoComplete="new-password"
                 />
                 <div className="auth-eye-btn" onClick={() => setShowPassword((s) => !s)}>
                   {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                 </div>
               </div>
+              {password.length > 0 && (
+                <div className="pw-meter">
+                  <div className={`pw-meter-bar ${score === 1 ? "weak" : score === 2 ? "fair" : score === 3 ? "good" : score === 4 ? "strong" : "weak"}`} />
+                </div>
+              )}
               <div className="pw-checklist">
                 <ChecklistItem met={rules.length} label="At least 8 characters" />
                 <ChecklistItem met={rules.case} label="Upper & lowercase letters" />
                 <ChecklistItem met={rules.number} label="At least one number" />
-                <ChecklistItem met={rules.symbol} label="At least one symbol" />
+                <ChecklistItem met={rules.symbol} label="At least one symbol (!@#$%...)" />
               </div>
             </div>
 
             <div className="auth-field">
-              <label className="auth-label">Confirm password</label>
+              <div className="auth-label-row">
+                <label className="auth-label" style={{ margin: 0 }}>Confirm password</label>
+                {capsLockOn && (
+                  <span className="auth-caps-badge">Caps Lock ON</span>
+                )}
+              </div>
               <div className={`auth-input-wrap ${focused === "confirm" ? "focused" : ""} ${confirm.length > 0 && !confirmValid ? "error" : ""}`}>
                 <Lock size={15} className="auth-input-icon" />
                 <input
@@ -354,8 +402,13 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
                   placeholder="Re-enter your password"
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
+                  onKeyDown={handleKeyEvent}
+                  onKeyUp={handleKeyEvent}
                   onFocus={() => setFocused("confirm")}
-                  onBlur={() => setFocused(null)}
+                  onBlur={() => {
+                    setFocused(null);
+                    setCapsLockOn(false);
+                  }}
                   autoComplete="new-password"
                 />
                 <div className="auth-eye-btn" onClick={() => setShowConfirm((s) => !s)}>

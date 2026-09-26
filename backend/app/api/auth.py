@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import get_current_user
 from app.core.email import EmailNotConfigured, EmailSendError, send_password_reset_email
-from app.core.rate_limit import forgot_password_limiter, login_limiter, rate_limit_key
+from app.core.rate_limit import (
+    forgot_password_limiter,
+    login_limiter,
+    rate_limit_key,
+    register_limiter,
+    reset_password_limiter,
+)
 from app.core.security import (
     generate_opaque_token,
     hash_opaque_token,
@@ -31,9 +37,16 @@ from app.schemas.auth import (
 logger = logging.getLogger("protopilot.auth")
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Pre-computed bcrypt hash of a random token used to thwart timing attacks.
+# If a user is not found, verify_password() is still executed against this hash
+# so the request duration matches an authentic password check (~200ms).
+_DUMMY_BCRYPT_HASH = "$2b$12$e86g5M2c8z8v3.6gWcE72.Jv57sR7jXnNq29.Oq5o3m2P7e9T9vGe"
+
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    register_limiter.check(rate_limit_key(request, body.email))
+
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
@@ -56,11 +69,15 @@ async def login(body: LoginRequest, request: Request, response: Response, db: As
 
     # Same error for "no such user" and "wrong password" — don't leak which one it was.
     invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
-    if user is None or user.hashed_password is None or not verify_password(body.password, user.hashed_password):
+    if user is None or user.hashed_password is None:
         # user.hashed_password is None for accounts created via Google/GitHub
-        # only — same generic error, so this doesn't leak how the account
-        # was created either.
+        # Run dummy verify_password to thwart timing-attacks for user enumeration
+        verify_password(body.password, _DUMMY_BCRYPT_HASH)
         raise invalid
+
+    if not verify_password(body.password, user.hashed_password):
+        raise invalid
+
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been disabled.")
 
@@ -160,7 +177,9 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+async def reset_password(body: ResetPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    reset_password_limiter.check(rate_limit_key(request, "reset_password"))
+
     token_hash = hash_opaque_token(body.token)
     result = await db.execute(select(User).where(User.reset_token_hash == token_hash))
     user = result.scalar_one_or_none()

@@ -34,11 +34,29 @@ class InMemoryRateLimiter:
             self._hits[key] = recent
 
 
-# 5 attempts per 5 minutes, keyed by "endpoint:client_ip:email"
+# Rate limiters for authentication endpoints:
 login_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=300)
 forgot_password_limiter = InMemoryRateLimiter(max_attempts=3, window_seconds=600)
+register_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=600)
+reset_password_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=600)
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Extract the real client IP address, accounting for reverse proxies
+    (Render, Cloudflare, AWS ALB) via the X-Forwarded-For header.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        # The first IP in the comma-separated list is the original client IP
+        client_ip = forwarded.split(",")[0].strip()
+        if client_ip:
+            return client_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
 
 
 def rate_limit_key(request: Request, identifier: str) -> str:
-    client_ip = request.client.host if request.client else "unknown"
-    return f"{client_ip}:{identifier.lower()}"
+    client_ip = get_client_ip(request)
+    return f"{client_ip}:{identifier.strip().lower()}"
