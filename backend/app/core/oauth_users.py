@@ -23,6 +23,7 @@ async def get_or_create_oauth_user(db: AsyncSession, provider: str, profile: OAu
     user = result.scalar_one_or_none()
     if user is not None:
         setattr(user, f"{provider}_id", profile.provider_user_id)
+        user.email_verified = True
         await db.commit()
         await db.refresh(user)
         return user
@@ -32,6 +33,7 @@ async def get_or_create_oauth_user(db: AsyncSession, provider: str, profile: OAu
         email=profile.email.lower(),
         name=profile.name.strip() or profile.email.split("@")[0],
         hashed_password=None,
+        email_verified=True,
     )
     setattr(user, f"{provider}_id", profile.provider_user_id)
     db.add(user)

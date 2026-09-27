@@ -9,12 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_current_user
-from app.core.email import EmailNotConfigured, EmailSendError, send_password_reset_email
+from app.core.email import EmailNotConfigured, EmailSendError, send_password_reset_email, send_verification_email
 from app.core.rate_limit import (
     forgot_password_limiter,
     login_limiter,
     rate_limit_key,
     register_limiter,
+    resend_verification_limiter,
     reset_password_limiter,
 )
 from app.core.security import (
@@ -31,6 +32,7 @@ from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     UserResponse,
 )
@@ -44,21 +46,53 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _DUMMY_BCRYPT_HASH = "$2b$12$e86g5M2c8z8v3.6gWcE72.Jv57sR7jXnNq29.Oq5o3m2P7e9T9vGe"
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+@router.post("/register", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     register_limiter.check(rate_limit_key(request, body.email))
 
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
+    user = existing.scalar_one_or_none()
 
-    user = User(email=body.email.lower(), name=body.name.strip(), hashed_password=hash_password(body.password))
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
+    if user is not None and user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists and is verified. Please log in.",
+        )
 
-    await issue_session(user, db, response)
-    return user
+    raw_token = generate_opaque_token()
+    token_hash = hash_opaque_token(raw_token)
+    token_expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)
+
+    if user is not None and not user.email_verified:
+        # User closed app earlier without verifying and is re-registering.
+        # Refresh credentials & issue a fresh verification token so they aren't locked out!
+        user.name = body.name.strip()
+        user.hashed_password = hash_password(body.password)
+        user.verification_token_hash = token_hash
+        user.verification_token_expires_at = token_expires
+        await db.commit()
+    else:
+        user = User(
+            email=body.email.lower(),
+            name=body.name.strip(),
+            hashed_password=hash_password(body.password),
+            email_verified=False,
+            verification_token_hash=token_hash,
+            verification_token_expires_at=token_expires,
+        )
+        db.add(user)
+        await db.commit()
+
+    verify_link = f"https://protopilot-0ku3.onrender.com/auth/verify-email?token={raw_token}"
+    try:
+        await send_verification_email(user.email, verify_link)
+    except (EmailNotConfigured, EmailSendError) as e:
+        logger.error("Failed to send verification email to %s: %s", user.email, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+
+    return MessageResponse(
+        message="A verification link has been sent to your email. Please check your inbox to activate your account."
+    )
 
 
 @router.post("/login", response_model=UserResponse)
@@ -81,6 +115,12 @@ async def login(body: LoginRequest, request: Request, response: Response, db: As
 
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been disabled.")
+
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email address before logging in. We've sent a verification link to your email.",
+        )
 
     await issue_session(user, db, response)
     return user
@@ -509,6 +549,220 @@ async def reset_password_page(token: str = ""):
       }}
     }});
   </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification(body: ResendVerificationRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    resend_verification_limiter.check(rate_limit_key(request, body.email))
+
+    result = await db.execute(select(User).where(User.email == body.email.lower()))
+    user = result.scalar_one_or_none()
+
+    generic_response = MessageResponse(
+        message="If an unverified account with that email exists, a fresh verification link has been sent."
+    )
+
+    if user is None or user.email_verified:
+        return generic_response
+
+    raw_token = generate_opaque_token()
+    user.verification_token_hash = hash_opaque_token(raw_token)
+    user.verification_token_expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)
+    await db.commit()
+
+    verify_link = f"https://protopilot-0ku3.onrender.com/auth/verify-email?token={raw_token}"
+    try:
+        await send_verification_email(user.email, verify_link)
+    except (EmailNotConfigured, EmailSendError) as e:
+        logger.error("Failed to send verification email to %s: %s", user.email, e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+
+    return generic_response
+
+
+@router.get("/verify-email", response_class=HTMLResponse)
+async def verify_email_page(token: str = "", db: AsyncSession = Depends(get_db)):
+    success = False
+    title = "Verifying..."
+    desc = "Please wait while we verify your email address."
+
+    if not token:
+        title = "Missing verification link"
+        desc = "The verification token is missing. Please click the full link sent to your email inbox."
+    else:
+        token_hash = hash_opaque_token(token)
+        result = await db.execute(select(User).where(User.verification_token_hash == token_hash))
+        user = result.scalar_one_or_none()
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expires_at = user.verification_token_expires_at if user is not None else None
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
+
+        if user is None or expires_at is None or expires_at < now:
+            title = "Invalid or expired link"
+            desc = "This verification link has expired or has already been used. Please log in or request a new verification link from the ProtoPilot app."
+        else:
+            user.email_verified = True
+            user.verification_token_hash = None
+            user.verification_token_expires_at = None
+            await db.commit()
+            success = True
+            title = "Email Verified Successfully!"
+            desc = f"Your email ({user.email}) has been verified. Your ProtoPilot account is now active and ready to use."
+
+    icon_html = (
+        '<div class="icon success-icon">✓</div>'
+        if success
+        else '<div class="icon error-icon">✕</div>'
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email Verification — ProtoPilot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0B0F19;
+      color: #E2E8F0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+      overflow-x: hidden;
+    }}
+    .glow {{
+      position: fixed;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.22), rgba(16, 185, 129, 0.12), transparent 70%);
+      top: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      filter: blur(80px);
+      pointer-events: none;
+    }}
+    .card {{
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 440px;
+      background: rgba(17, 24, 39, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(24px);
+      border-radius: 20px;
+      padding: 40px 36px;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+    }}
+    .brand {{
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }}
+    .brand-icon {{
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #4F46E5, #7C3AED);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 18px;
+      color: #fff;
+    }}
+    .brand-name {{
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 18px;
+      color: #FFFFFF;
+      letter-spacing: -0.02em;
+    }}
+    .icon {{
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      margin: 0 auto 20px;
+    }}
+    .success-icon {{
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #10B981;
+    }}
+    .error-icon {{
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #EF4444;
+    }}
+    h1 {{
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: #FFFFFF;
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }}
+    p.desc {{
+      font-size: 14px;
+      color: #94A3B8;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }}
+    .btn {{
+      display: inline-block;
+      width: 100%;
+      background: linear-gradient(135deg, #4F46E5, #7C3AED);
+      color: #FFFFFF;
+      font-weight: 600;
+      font-size: 14.5px;
+      text-decoration: none;
+      border: none;
+      border-radius: 10px;
+      padding: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+    }}
+    .btn:hover {{
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }}
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="card">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-name">ProtoPilot</div>
+    </div>
+
+    {icon_html}
+
+    <h1>{title}</h1>
+    <p class="desc">{desc}</p>
+
+    <button class="btn" onclick="window.close()">You can close this window and open ProtoPilot</button>
+  </div>
 </body>
 </html>"""
     return HTMLResponse(content=html)

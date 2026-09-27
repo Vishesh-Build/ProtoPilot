@@ -103,3 +103,8 @@ app.include_router(exports.router)
 async def root_reset_password_redirect(token: str = ""):
     return RedirectResponse(url=f"/auth/reset-password?token={token}")
 
+
+@app.get("/verify-email")
+async def root_verify_email_redirect(token: str = ""):
+    return RedirectResponse(url=f"/auth/verify-email?token={token}")
+

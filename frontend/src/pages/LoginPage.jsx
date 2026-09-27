@@ -193,6 +193,9 @@ const styles = `
     background: #FDF3F3; border: 1px solid #F5D9D9; border-radius: 12px;
     padding: 10px 12px; margin-bottom: 18px; font-size: 12px; color: #B23A3A; line-height: 1.5;
   }
+  .auth-banner.success {
+    background: #F0FDF4; border: 1px solid #DCFCE7; color: #166534;
+  }
 
   .auth-security-note {
     display: flex; align-items: center; gap: 7px; justify-content: center;
@@ -216,6 +219,22 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [error, setError] = useState("");
+  const [resendingVerify, setResendingVerify] = useState(false);
+  const [verifyNotice, setVerifyNotice] = useState("");
+
+  const handleResendVerify = async () => {
+    if (!emailClean) return;
+    setResendingVerify(true);
+    try {
+      await authApi.resendVerification(emailClean);
+      setError("");
+      setVerifyNotice("A fresh verification link has been sent to your email!");
+    } catch (err) {
+      setError(err.message || "Failed to resend verification link.");
+    } finally {
+      setResendingVerify(false);
+    }
+  };
 
   React.useEffect(() => {
     if (lockoutSeconds <= 0) return;
@@ -241,6 +260,7 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
     if (!canSubmit) return;
     setSubmitting(true);
     setError("");
+    setVerifyNotice("");
     try {
       const user = await authApi.login(emailClean, password);
       setFailedAttempts(0);
@@ -313,12 +333,37 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
                 </div>
               </div>
             </div>
+          ) : verifyNotice ? (
+            <div className="auth-banner success">
+              <Check size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{verifyNotice}</span>
+            </div>
           ) : error ? (
             <div className="auth-banner">
               <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
               <div>
                 <span>{error}</span>
-                {failedAttempts >= 3 && (
+                {error.toLowerCase().includes("verify your email") && (
+                  <div style={{ marginTop: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handleResendVerify}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#4A63E8",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        padding: 0,
+                        fontSize: 12,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      {resendingVerify ? "Sending..." : "Resend verification link"}
+                    </button>
+                  </div>
+                )}
+                {failedAttempts >= 3 && !error.toLowerCase().includes("verify your email") && (
                   <div style={{ marginTop: 4, fontSize: 11.5, opacity: 0.9 }}>
                     If you are unsure of your password, consider clicking "Forgot password?" below.
                   </div>

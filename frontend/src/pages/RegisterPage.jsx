@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Mail, Lock, Eye, EyeOff, ArrowRight, Radio, ShieldCheck,
-  Github, Check, Sparkles, Lock as LockIcon, User, X, AlertCircle,
+  Github, Check, Sparkles, Lock as LockIcon, User, X, AlertCircle, MailCheck,
 } from "lucide-react";
 import { authApi, API_BASE_URL } from "../lib/api.js";
 
@@ -203,6 +203,22 @@ const styles = `
     background: #FDF3F3; border: 1px solid #F5D9D9; border-radius: 12px;
     padding: 10px 12px; margin-bottom: 18px; font-size: 12px; color: #B23A3A; line-height: 1.5;
   }
+  .auth-banner.success {
+    background: #F0FDF4; border: 1px solid #DCFCE7; color: #166534;
+  }
+
+  .auth-submit.ghost {
+    background: #fff; color: #3A3C46; border: 1px solid #E7E9F2;
+    box-shadow: none;
+  }
+  .auth-submit.ghost:hover { border-color: #C9CCDA; background: #FAFBFD; box-shadow: none; }
+
+  .confirm-icon-wrap {
+    width: 54px; height: 54px; border-radius: 16px; margin-bottom: 18px;
+    background: linear-gradient(135deg, rgba(74,99,232,0.12), rgba(124,107,234,0.12));
+    display: flex; align-items: center; justify-content: center; color: #4A63E8;
+  }
+  .resend-row { font-size: 12.5px; color: #767A8C; text-align: center; margin-top: 18px; }
 
   .auth-security-note {
     display: flex; align-items: center; gap: 7px; justify-content: center;
@@ -232,6 +248,19 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  const [sent, setSent] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCooldown((c) => (c <= 1 ? 0 : c - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
   const handleKeyEvent = (e) => {
     if (e.getModifierState) {
       setCapsLockOn(e.getModifierState("CapsLock"));
@@ -252,13 +281,31 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
     if (!canSubmit) return;
     setSubmitting(true);
     setError("");
+    setNotice("");
     try {
-      const user = await authApi.register(cleanName, cleanEmail, password);
-      onRegister?.(user);
+      await authApi.register(cleanName, cleanEmail, password);
+      setSent(true);
+      setCooldown(60);
     } catch (err) {
       setError(err.message || "Registration failed — please try again.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (cooldown > 0 || resending) return;
+    setResending(true);
+    setError("");
+    setNotice("");
+    try {
+      await authApi.resendVerification(cleanEmail);
+      setCooldown(60);
+      setNotice("A fresh verification link has been sent to your email!");
+    } catch (err) {
+      setError(err.message || "Failed to resend verification email.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -299,165 +346,207 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
 
       <div className="auth-right">
         <div className="auth-form-wrap">
-          <div className="auth-form-head">
-            <h2 className="auth-title auth-display">Create your account</h2>
-            <p className="auth-subtitle">Start turning meetings into working prototypes.</p>
-          </div>
-
-          {error && (
-            <div className="auth-banner">
-              <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit}>
-            <div className="auth-field">
-              <label className="auth-label">Full name</label>
-              <div className={`auth-input-wrap ${focused === "name" ? "focused" : ""}`}>
-                <User size={15} className="auth-input-icon" />
-                <input
-                  className="auth-input"
-                  type="text"
-                  placeholder="Your name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onFocus={() => setFocused("name")}
-                  onBlur={() => setFocused(null)}
-                  autoComplete="name"
-                />
+          {sent ? (
+            <>
+              <div className="confirm-icon-wrap"><MailCheck size={26} /></div>
+              <div className="auth-form-head">
+                <h2 className="auth-title auth-display">Check your inbox</h2>
+                <p className="auth-subtitle">
+                  We've sent a verification link to <b>{email}</b>. Click the link in your email to activate your account.
+                </p>
               </div>
-            </div>
 
-            <div className="auth-field">
-              <label className="auth-label">Email</label>
-              <div className={`auth-input-wrap ${focused === "email" ? "focused" : ""}`}>
-                <Mail size={15} className="auth-input-icon" />
-                <input
-                  className="auth-input"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onFocus={() => setFocused("email")}
-                  onBlur={() => setFocused(null)}
-                  autoComplete="email"
-                />
-              </div>
-            </div>
-
-            <div className="auth-field">
-              <div className="auth-label-row">
-                <label className="auth-label" style={{ margin: 0 }}>Password</label>
-                {capsLockOn && (
-                  <span className="auth-caps-badge">Caps Lock ON</span>
-                )}
-              </div>
-              <div className={`auth-input-wrap ${focused === "password" ? "focused" : ""}`}>
-                <Lock size={15} className="auth-input-icon" />
-                <input
-                  className="auth-input"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Create a strong password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={handleKeyEvent}
-                  onKeyUp={handleKeyEvent}
-                  onFocus={() => setFocused("password")}
-                  onBlur={() => {
-                    setFocused(null);
-                    setCapsLockOn(false);
-                  }}
-                  autoComplete="new-password"
-                />
-                <div className="auth-eye-btn" onClick={() => setShowPassword((s) => !s)}>
-                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                </div>
-              </div>
-              {password.length > 0 && (
-                <div className="pw-meter">
-                  <div className={`pw-meter-bar ${score === 1 ? "weak" : score === 2 ? "fair" : score === 3 ? "good" : score === 4 ? "strong" : "weak"}`} />
+              {notice && (
+                <div className="auth-banner success">
+                  <Check size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{notice}</span>
                 </div>
               )}
-              <div className="pw-checklist">
-                <ChecklistItem met={rules.length} label="At least 8 characters" />
-                <ChecklistItem met={rules.case} label="Upper & lowercase letters" />
-                <ChecklistItem met={rules.number} label="At least one number" />
-                <ChecklistItem met={rules.symbol} label="At least one symbol (!@#$%...)" />
-              </div>
-            </div>
+              {error && (
+                <div className="auth-banner">
+                  <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{error}</span>
+                </div>
+              )}
 
-            <div className="auth-field">
-              <div className="auth-label-row">
-                <label className="auth-label" style={{ margin: 0 }}>Confirm password</label>
-                {capsLockOn && (
-                  <span className="auth-caps-badge">Caps Lock ON</span>
+              <button className="auth-submit ghost" onClick={onGoLogin} style={{ marginTop: 16 }}>
+                Back to log in
+              </button>
+
+              <div className="resend-row">
+                Didn't get it? Check spam, or{" "}
+                {cooldown > 0 ? (
+                  <span style={{ color: "#767A8C", fontWeight: 600 }}>resend available in {cooldown}s</span>
+                ) : (
+                  <span className="auth-link" onClick={handleResend}>
+                    {resending ? "Sending..." : "resend verification link"}
+                  </span>
                 )}
               </div>
-              <div className={`auth-input-wrap ${focused === "confirm" ? "focused" : ""} ${confirm.length > 0 && !confirmValid ? "error" : ""}`}>
-                <Lock size={15} className="auth-input-icon" />
-                <input
-                  className="auth-input"
-                  type={showConfirm ? "text" : "password"}
-                  placeholder="Re-enter your password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  onKeyDown={handleKeyEvent}
-                  onKeyUp={handleKeyEvent}
-                  onFocus={() => setFocused("confirm")}
-                  onBlur={() => {
-                    setFocused(null);
-                    setCapsLockOn(false);
-                  }}
-                  autoComplete="new-password"
-                />
-                <div className="auth-eye-btn" onClick={() => setShowConfirm((s) => !s)}>
-                  {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
-                </div>
+            </>
+          ) : (
+            <>
+              <div className="auth-form-head">
+                <h2 className="auth-title auth-display">Create your account</h2>
+                <p className="auth-subtitle">Start turning meetings into working prototypes.</p>
               </div>
-            </div>
 
-            <div className="auth-row">
-              <span className={`auth-checkbox ${agree ? "checked" : ""}`} onClick={() => setAgree((a) => !a)}>
-                {agree && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3.5L3.2 5.7L8 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-              </span>
-              <span className="auth-terms-text" onClick={() => setAgree((a) => !a)}>
-                I agree to the <span className="auth-link" onClick={(e) => e.stopPropagation()}>Terms of Service</span> and{" "}
-                <span className="auth-link" onClick={(e) => e.stopPropagation()}>Privacy Policy</span>
-              </span>
-            </div>
+              {error && (
+                <div className="auth-banner">
+                  <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{error}</span>
+                </div>
+              )}
 
-            <button type="submit" className="auth-submit" disabled={!canSubmit}>
-              {submitting ? "Creating account…" : "Create account"} <ArrowRight size={15} />
-            </button>
-          </form>
+              <form onSubmit={handleSubmit}>
+                <div className="auth-field">
+                  <label className="auth-label">Full name</label>
+                  <div className={`auth-input-wrap ${focused === "name" ? "focused" : ""}`}>
+                    <User size={15} className="auth-input-icon" />
+                    <input
+                      className="auth-input"
+                      type="text"
+                      placeholder="Your name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onFocus={() => setFocused("name")}
+                      onBlur={() => setFocused(null)}
+                      autoComplete="name"
+                    />
+                  </div>
+                </div>
 
-          <div className="auth-divider">
-            <div className="auth-divider-line" />
-            <span className="auth-divider-text">or continue with</span>
-            <div className="auth-divider-line" />
-          </div>
+                <div className="auth-field">
+                  <label className="auth-label">Email</label>
+                  <div className={`auth-input-wrap ${focused === "email" ? "focused" : ""}`}>
+                    <Mail size={15} className="auth-input-icon" />
+                    <input
+                      className="auth-input"
+                      type="email"
+                      placeholder="you@company.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => setFocused("email")}
+                      onBlur={() => setFocused(null)}
+                      autoComplete="email"
+                    />
+                  </div>
+                </div>
 
-          <div className="auth-oauth-row">
-            <button
-              type="button"
-              className="auth-oauth-btn"
-              onClick={() => { window.location.href = `${API_BASE_URL}/auth/google/login`; }}
-            >
-              <GoogleMark /> Google
-            </button>
-            <button
-              type="button"
-              className="auth-oauth-btn"
-              onClick={() => { window.location.href = `${API_BASE_URL}/auth/github/login`; }}
-            >
-              <Github size={15} /> GitHub
-            </button>
-          </div>
+                <div className="auth-field">
+                  <div className="auth-label-row">
+                    <label className="auth-label" style={{ margin: 0 }}>Password</label>
+                    {capsLockOn && (
+                      <span className="auth-caps-badge">Caps Lock ON</span>
+                    )}
+                  </div>
+                  <div className={`auth-input-wrap ${focused === "password" ? "focused" : ""}`}>
+                    <Lock size={15} className="auth-input-icon" />
+                    <input
+                      className="auth-input"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Create a strong password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onKeyDown={handleKeyEvent}
+                      onKeyUp={handleKeyEvent}
+                      onFocus={() => setFocused("password")}
+                      onBlur={() => {
+                        setFocused(null);
+                        setCapsLockOn(false);
+                      }}
+                      autoComplete="new-password"
+                    />
+                    <div className="auth-eye-btn" onClick={() => setShowPassword((s) => !s)}>
+                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </div>
+                  </div>
+                  {password.length > 0 && (
+                    <div className="pw-meter">
+                      <div className={`pw-meter-bar ${score === 1 ? "weak" : score === 2 ? "fair" : score === 3 ? "good" : score === 4 ? "strong" : "weak"}`} />
+                    </div>
+                  )}
+                  <div className="pw-checklist">
+                    <ChecklistItem met={rules.length} label="At least 8 characters" />
+                    <ChecklistItem met={rules.case} label="Upper & lowercase letters" />
+                    <ChecklistItem met={rules.number} label="At least one number" />
+                    <ChecklistItem met={rules.symbol} label="At least one symbol (!@#$%...)" />
+                  </div>
+                </div>
 
-          <div className="auth-footer-text">
-            Already have an account? <span className="auth-link" onClick={onGoLogin}>Log in</span>
-          </div>
+                <div className="auth-field">
+                  <div className="auth-label-row">
+                    <label className="auth-label" style={{ margin: 0 }}>Confirm password</label>
+                    {capsLockOn && (
+                      <span className="auth-caps-badge">Caps Lock ON</span>
+                    )}
+                  </div>
+                  <div className={`auth-input-wrap ${focused === "confirm" ? "focused" : ""} ${confirm.length > 0 && !confirmValid ? "error" : ""}`}>
+                    <Lock size={15} className="auth-input-icon" />
+                    <input
+                      className="auth-input"
+                      type={showConfirm ? "text" : "password"}
+                      placeholder="Re-enter your password"
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      onKeyDown={handleKeyEvent}
+                      onKeyUp={handleKeyEvent}
+                      onFocus={() => setFocused("confirm")}
+                      onBlur={() => {
+                        setFocused(null);
+                        setCapsLockOn(false);
+                      }}
+                      autoComplete="new-password"
+                    />
+                    <div className="auth-eye-btn" onClick={() => setShowConfirm((s) => !s)}>
+                      {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="auth-row">
+                  <span className={`auth-checkbox ${agree ? "checked" : ""}`} onClick={() => setAgree((a) => !a)}>
+                    {agree && <svg width="9" height="7" viewBox="0 0 9 7" fill="none"><path d="M1 3.5L3.2 5.7L8 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </span>
+                  <span className="auth-terms-text" onClick={() => setAgree((a) => !a)}>
+                    I agree to the <span className="auth-link" onClick={(e) => e.stopPropagation()}>Terms of Service</span> and{" "}
+                    <span className="auth-link" onClick={(e) => e.stopPropagation()}>Privacy Policy</span>
+                  </span>
+                </div>
+
+                <button type="submit" className="auth-submit" disabled={!canSubmit}>
+                  {submitting ? "Creating account…" : "Create account"} <ArrowRight size={15} />
+                </button>
+              </form>
+
+              <div className="auth-divider">
+                <div className="auth-divider-line" />
+                <span className="auth-divider-text">or continue with</span>
+                <div className="auth-divider-line" />
+              </div>
+
+              <div className="auth-oauth-row">
+                <button
+                  type="button"
+                  className="auth-oauth-btn"
+                  onClick={() => { window.location.href = `${API_BASE_URL}/auth/google/login`; }}
+                >
+                  <GoogleMark /> Google
+                </button>
+                <button
+                  type="button"
+                  className="auth-oauth-btn"
+                  onClick={() => { window.location.href = `${API_BASE_URL}/auth/github/login`; }}
+                >
+                  <Github size={15} /> GitHub
+                </button>
+              </div>
+
+              <div className="auth-footer-text">
+                Already have an account? <span className="auth-link" onClick={onGoLogin}>Log in</span>
+              </div>
+            </>
+          )}
 
           <div className="auth-security-note">
             <ShieldCheck size={12} /> Passwords are hashed and never stored in plain text

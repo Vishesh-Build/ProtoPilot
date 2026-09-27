@@ -28,9 +28,16 @@ class User(Base):
     github_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    # --- Email verification ---
+    verification_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verification_token_expires_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # --- Password reset ---

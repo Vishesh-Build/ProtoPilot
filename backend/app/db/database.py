@@ -65,11 +65,32 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+from sqlalchemy import text
+
+
 async def init_models():
     """
-    Creates tables if they don't exist yet. Fine for getting started quickly;
-    once the schema stabilizes, switch to Alembic migrations instead of
-    calling this on every startup (create_all never alters existing tables).
+    Creates tables if they don't exist yet, and safely adds new columns
+    to existing tables without needing manual database resets.
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_hash VARCHAR(255);"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_expires_at TIMESTAMPTZ;"))
+            await conn.execute(text("UPDATE users SET email_verified = TRUE WHERE email_verified IS NULL;"))
+        except Exception:
+            # Fallback for SQLite in local development
+            try:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 1;"))
+            except Exception:
+                pass
+            try:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN verification_token_hash VARCHAR(255);"))
+            except Exception:
+                pass
+            try:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN verification_token_expires_at TIMESTAMP;"))
+            except Exception:
+                pass

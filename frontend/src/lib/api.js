@@ -74,6 +74,7 @@ const _NO_REFRESH = new Set([
   "/auth/logout",
   "/auth/forgot-password",
   "/auth/reset-password",
+  "/auth/resend-verification",
 ]);
 
 async function request(path, options = {}) {
@@ -178,6 +179,12 @@ export const authApi = {
 
   forgotPassword: (email) =>
     request("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resendVerification: (email) =>
+    request("/auth/resend-verification", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),

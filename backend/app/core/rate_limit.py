@@ -39,6 +39,7 @@ login_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=300)
 forgot_password_limiter = InMemoryRateLimiter(max_attempts=3, window_seconds=600)
 register_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=600)
 reset_password_limiter = InMemoryRateLimiter(max_attempts=5, window_seconds=600)
+resend_verification_limiter = InMemoryRateLimiter(max_attempts=4, window_seconds=600)
 
 
 def get_client_ip(request: Request) -> str:

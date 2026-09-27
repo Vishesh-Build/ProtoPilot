@@ -74,10 +74,20 @@ class ResetPasswordRequest(BaseModel):
         return v
 
 
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: EmailStr) -> str:
+        return str(v).strip().lower()
+
+
 class UserResponse(BaseModel):
     id: str
     name: str
     email: EmailStr
+    email_verified: bool = True
 
     model_config = {"from_attributes": True}
 
