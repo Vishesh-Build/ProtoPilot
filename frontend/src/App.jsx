@@ -12,6 +12,7 @@ import GenerationPipelinePage from "./pages/GenerationPipelinePage.jsx";
 import PrototypeViewerPage from "./pages/PrototypeViewerPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import UpdateNotification from "./components/UpdateNotification.jsx";
+import CosmicOrbLoader from "./components/CosmicOrbLoader.jsx";
 import { authApi, meetingsApi, API_BASE_URL } from "./lib/api.js";
 
 /* ============================================================
@@ -56,7 +57,8 @@ export default function App() {
   const [page, setPage] = useState(initialToken ? "reset" : wantsAdmin ? "admin" : "home");
   const [resetToken, setResetToken] = useState(initialToken);
   const [currentUser, setCurrentUser] = useState(null);
-  const [checkingSession, setCheckingSession] = useState(!initialToken);
+  const [sessionCheckDone, setSessionCheckDone] = useState(Boolean(initialToken));
+  const [showSplash, setShowSplash] = useState(!initialToken);
 
   const [activeMeetingId, setActiveMeetingId] = useState(null);
   const [isMeetingHost, setIsMeetingHost] = useState(true);
@@ -96,12 +98,12 @@ export default function App() {
     if (initialToken) return;
     let cancelled = false;
 
-    // Strict safety timer: never block app startup for more than 2000ms
+    // Strict safety timer: never block app startup for more than 2500ms
     const safetyTimer = setTimeout(() => {
       if (!cancelled) {
-        setCheckingSession(false);
+        setSessionCheckDone(true);
       }
-    }, 2000);
+    }, 2500);
 
     authApi
       .me()
@@ -116,7 +118,7 @@ export default function App() {
       .catch(() => {})
       .finally(() => {
         clearTimeout(safetyTimer);
-        if (!cancelled) setCheckingSession(false);
+        if (!cancelled) setSessionCheckDone(true);
         if (!cancelled && cameFromOAuth) window.history.replaceState({}, "", window.location.pathname);
       });
 
@@ -213,47 +215,7 @@ export default function App() {
     setPage("dashboard");
   };
 
-  if (checkingSession) {
-    return (
-      <div
-        style={{
-          minHeight: "100vh",
-          backgroundColor: "#0b0f19",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#f3f4f6",
-          gap: "14px",
-          userSelect: "none",
-        }}
-      >
-        <div
-          style={{
-            width: "52px",
-            height: "52px",
-            borderRadius: "14px",
-            background: "linear-gradient(135deg, #4F46E5, #06B6D4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 0 28px rgba(79, 70, 229, 0.45)",
-          }}
-        >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-        </div>
-        <div style={{ fontSize: "19px", fontWeight: "600", letterSpacing: "-0.02em", color: "#ffffff" }}>
-          ProtoPilot
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#9ca3af", fontSize: "13px" }}>
-          <div className="pp-splash-spinner" />
-          <span>Starting ProtoPilot...</span>
-        </div>
-      </div>
-    );
-  }
+
 
   const liveCallProps = {
     meetingId: activeMeetingId,
@@ -363,6 +325,12 @@ export default function App() {
       {persistentLiveCall}
       {currentPage}
       <UpdateNotification />
+      {showSplash && (
+        <CosmicOrbLoader
+          isReady={sessionCheckDone}
+          onFinish={() => setShowSplash(false)}
+        />
+      )}
     </>
   );
 }
