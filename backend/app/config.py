@@ -61,10 +61,10 @@ class Settings(BaseSettings):
     # as the fast, higher-throughput fallback — a 429 on 120b is transient, so
     # the router simply moves on, and NIM serves gpt-oss-20b as well.
     groq_models: str = (
-        "llama-3.3-70b-versatile,"
-        "llama-3.1-8b-instant,"
         "openai/gpt-oss-120b,"
-        "openai/gpt-oss-20b"
+        "openai/gpt-oss-20b,"
+        "llama-3.3-70b-versatile,"
+        "llama-3.1-8b-instant"
     )
 
     # ---- Google Gemini (optional, but the best free budget available) ----
