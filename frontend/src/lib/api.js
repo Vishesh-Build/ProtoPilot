@@ -77,6 +77,20 @@ const _NO_REFRESH = new Set([
   "/auth/resend-verification",
 ]);
 
+export function getStoredToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("protopilot_token");
+}
+
+export function setStoredToken(token) {
+  if (typeof window === "undefined") return;
+  if (token) {
+    localStorage.setItem("protopilot_token", token);
+  } else {
+    localStorage.removeItem("protopilot_token");
+  }
+}
+
 async function request(path, options = {}) {
   const timeoutMs = options.timeout ?? 15000;
   const controller = new AbortController();
@@ -85,12 +99,16 @@ async function request(path, options = {}) {
 
   const adminSecret =
     typeof window !== "undefined" ? sessionStorage.getItem("admin_secret") : null;
+  const token = getStoredToken();
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
   if (adminSecret && !headers["X-Admin-Secret"]) {
     headers["X-Admin-Secret"] = adminSecret;
+  }
+  if (token && !headers["Authorization"]) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   let res;
@@ -173,7 +191,10 @@ export const authApi = {
       body: JSON.stringify({ email, password }),
     }),
 
-  logout: () => request("/auth/logout", { method: "POST" }),
+  logout: () => {
+    setStoredToken(null);
+    return request("/auth/logout", { method: "POST" });
+  },
 
   me: (options = {}) => request("/auth/me", { timeout: 3000, ...options }),
 

@@ -3,7 +3,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, Radio, ShieldCheck,
   Github, AlertCircle, Check, Sparkles, Lock as LockIcon,
 } from "lucide-react";
-import { authApi, API_BASE_URL } from "../lib/api.js";
+import { authApi, API_BASE_URL, setStoredToken } from "../lib/api.js";
 
 /* ============================================================
    ProtoPilot — Login (desktop split layout)
@@ -221,6 +221,38 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
   const [error, setError] = useState("");
   const [resendingVerify, setResendingVerify] = useState(false);
   const [verifyNotice, setVerifyNotice] = useState("");
+  const [oauthLoading, setOauthLoading] = useState(null); // "google" | "github" | null
+
+  const handleOAuthLogin = async (provider) => {
+    setError("");
+    setVerifyNotice("");
+    setOauthLoading(provider);
+
+    if (
+      typeof window !== "undefined" &&
+      window.protopilotDesktop &&
+      typeof window.protopilotDesktop.openOAuthPopup === "function"
+    ) {
+      try {
+        const result = await window.protopilotDesktop.openOAuthPopup(provider);
+        if (result && result.success && result.token) {
+          setStoredToken(result.token);
+          const user = await authApi.me();
+          onLogin?.(user);
+          return;
+        } else if (result && result.error && result.error !== "Authentication window was closed") {
+          setError(result.error);
+        }
+      } catch (err) {
+        setError(err.message || `Failed to sign in with ${provider}`);
+      } finally {
+        setOauthLoading(null);
+      }
+    } else {
+      // Browser fallback: redirect directly
+      window.location.href = `${API_BASE_URL}/auth/${provider}/login`;
+    }
+  };
 
   const handleResendVerify = async () => {
     if (!emailClean) return;
@@ -451,16 +483,18 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
             <button
               type="button"
               className="auth-oauth-btn"
-              onClick={() => { window.location.href = `${API_BASE_URL}/auth/google/login`; }}
+              disabled={Boolean(oauthLoading) || submitting}
+              onClick={() => handleOAuthLogin("google")}
             >
-              <GoogleMark /> Google
+              <GoogleMark /> {oauthLoading === "google" ? "Connecting…" : "Google"}
             </button>
             <button
               type="button"
               className="auth-oauth-btn"
-              onClick={() => { window.location.href = `${API_BASE_URL}/auth/github/login`; }}
+              disabled={Boolean(oauthLoading) || submitting}
+              onClick={() => handleOAuthLogin("github")}
             >
-              <Github size={15} /> GitHub
+              <Github size={15} /> {oauthLoading === "github" ? "Connecting…" : "GitHub"}
             </button>
           </div>
 

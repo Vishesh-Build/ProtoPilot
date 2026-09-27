@@ -40,9 +40,9 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE, path="/", domain=settings.cookie_domain)
 
 
-async def issue_session(user: User, db: AsyncSession, response: Response) -> None:
+async def issue_session(user: User, db: AsyncSession, response: Response) -> str:
     """Mints a fresh access + refresh token pair, rotates the stored refresh
-    token hash (invalidating any previous one), and sets both as cookies."""
+    token hash (invalidating any previous one), sets both as cookies, and returns the access_token."""
     access_token = create_access_token(user.id)
 
     refresh_token = generate_opaque_token()
@@ -53,3 +53,4 @@ async def issue_session(user: User, db: AsyncSession, response: Response) -> Non
     await db.commit()
 
     set_auth_cookies(response, access_token, refresh_token)
+    return access_token

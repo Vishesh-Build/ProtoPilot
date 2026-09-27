@@ -163,6 +163,108 @@ ipcMain.handle("protopilot:set-api-base-url", (_event, url) => {
 });
 
 /* ------------------------------------------------------------
+   Native OAuth Popup Window (Google / GitHub)
+
+   Opens a dedicated child window with standard Chrome user-agent
+   (preventing Google's disallowed_useragent block) and intercepts
+   the OAuth callback to extract session tokens directly.
+   ------------------------------------------------------------ */
+ipcMain.handle("protopilot:open-oauth-popup", async (_event, provider) => {
+  if (provider !== "google" && provider !== "github") {
+    return { success: false, error: "Unsupported OAuth provider" };
+  }
+
+  const startUrl = `${API_BASE_URL}/auth/${provider}/login`;
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const authWin = new BrowserWindow({
+      width: 520,
+      height: 700,
+      parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : null,
+      modal: true,
+      show: true,
+      title: `${provider === "google" ? "Google" : "GitHub"} Sign In — ProtoPilot`,
+      backgroundColor: "#0b0f19",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+    });
+
+    authWin.setMenuBarVisibility(false);
+
+    // Standard desktop Chrome User-Agent so Google allows the OAuth web flow
+    const CHROME_DESKTOP_UA =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+    authWin.webContents.setUserAgent(CHROME_DESKTOP_UA);
+
+    // External links inside OAuth (e.g. Terms / Privacy) open in system browser
+    authWin.webContents.setWindowOpenHandler(({ url }) => {
+      shell.openExternal(url);
+      return { action: "deny" };
+    });
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try {
+        if (!authWin.isDestroyed()) {
+          authWin.close();
+        }
+      } catch {}
+      resolve(result);
+    };
+
+    const checkUrl = (targetUrl) => {
+      try {
+        const u = new URL(targetUrl);
+        if (u.searchParams.get("oauth") === "success") {
+          const token = u.searchParams.get("oauth_token");
+          finish({ success: true, token });
+          return true;
+        }
+        if (u.searchParams.get("oauth") === "error") {
+          const reason = u.searchParams.get("error") || "OAuth sign-in failed";
+          finish({ success: false, error: reason });
+          return true;
+        }
+      } catch {}
+      return false;
+    };
+
+    authWin.webContents.on("will-navigate", (e, targetUrl) => {
+      if (checkUrl(targetUrl)) {
+        e.preventDefault();
+      }
+    });
+
+    authWin.webContents.on("will-redirect", (e, targetUrl) => {
+      if (checkUrl(targetUrl)) {
+        e.preventDefault();
+      }
+    });
+
+    authWin.webContents.on("did-navigate", (_e, targetUrl) => {
+      checkUrl(targetUrl);
+    });
+
+    authWin.on("closed", () => {
+      if (!settled) {
+        finish({ success: false, error: "Authentication window was closed" });
+      }
+    });
+
+    authWin.loadURL(startUrl).catch((err) => {
+      console.error("[main] Failed to load OAuth start URL:", err);
+      finish({ success: false, error: err.message || "Failed to load authentication page" });
+    });
+  });
+});
+
+/* ------------------------------------------------------------
    Screen-share source picker (Zoom-style).
 
    getDisplayMedia's built-in Electron picker is bare and can't be

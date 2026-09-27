@@ -13,7 +13,7 @@ import PrototypeViewerPage from "./pages/PrototypeViewerPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import UpdateNotification from "./components/UpdateNotification.jsx";
 import CosmicOrbLoader from "./components/CosmicOrbLoader.jsx";
-import { authApi, meetingsApi, API_BASE_URL } from "./lib/api.js";
+import { authApi, meetingsApi, API_BASE_URL, setStoredToken } from "./lib/api.js";
 
 /* ============================================================
    ProtoPilot — App shell
@@ -50,15 +50,26 @@ function generateMeetingId() {
 
 export default function App() {
   const params = getSearchParams();
-  const initialToken = params.get("token");
-  const cameFromOAuth = params.get("oauth") === "success";
+  const oauthToken = params.get("oauth_token");
+  const cameFromOAuth = params.get("oauth") === "success" || Boolean(oauthToken);
+  if (oauthToken) {
+    setStoredToken(oauthToken);
+    try {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch {}
+  }
+  const tokenParam = params.get("token");
+  // Only treat tokenParam as password reset token if not coming from OAuth
+  const initialResetToken = !cameFromOAuth && tokenParam ? tokenParam : null;
   const wantsAdmin = params.get("page") === "admin" || params.get("admin") === "1";
 
-  const [page, setPage] = useState(initialToken ? "reset" : wantsAdmin ? "admin" : "home");
-  const [resetToken, setResetToken] = useState(initialToken);
+  const [page, setPage] = useState(
+    initialResetToken ? "reset" : cameFromOAuth ? "dashboard" : wantsAdmin ? "admin" : "home"
+  );
+  const [resetToken, setResetToken] = useState(initialResetToken);
   const [currentUser, setCurrentUser] = useState(null);
-  const [sessionCheckDone, setSessionCheckDone] = useState(Boolean(initialToken));
-  const [showSplash, setShowSplash] = useState(!initialToken);
+  const [sessionCheckDone, setSessionCheckDone] = useState(Boolean(initialResetToken));
+  const [showSplash, setShowSplash] = useState(!initialResetToken);
 
   const [activeMeetingId, setActiveMeetingId] = useState(null);
   const [isMeetingHost, setIsMeetingHost] = useState(true);
@@ -95,7 +106,7 @@ export default function App() {
   const [liveLogs, setLiveLogs] = useState({});
 
   useEffect(() => {
-    if (initialToken) return;
+    if (initialResetToken) return;
     let cancelled = false;
 
     // Strict safety timer: never block app startup for more than 2500ms
@@ -115,11 +126,20 @@ export default function App() {
           return p === "home" || cameFromOAuth ? "dashboard" : p;
         });
       })
-      .catch(() => {})
+      .catch(() => {
+        if (cancelled) return;
+        if (cameFromOAuth) {
+          setPage("login");
+        }
+      })
       .finally(() => {
         clearTimeout(safetyTimer);
         if (!cancelled) setSessionCheckDone(true);
-        if (!cancelled && cameFromOAuth) window.history.replaceState({}, "", window.location.pathname);
+        if (!cancelled && cameFromOAuth) {
+          try {
+            window.history.replaceState({}, "", window.location.pathname);
+          } catch {}
+        }
       });
 
     return () => {
