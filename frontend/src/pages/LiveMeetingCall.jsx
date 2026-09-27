@@ -3,6 +3,7 @@ import {
   ChevronLeft, ChevronRight, Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   Copy, PhoneOff, X, Check, Zap, Settings, Smile, Send, Sparkles, Loader2, AlertCircle,
   Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock, Maximize, Minimize, Volume2, Square,
+  FileDown, UserCheck, ShieldAlert,
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { meetingsApi, ApiError } from "../lib/api.js";
@@ -502,6 +503,92 @@ const styles = `
     background: #4A63E8; cursor: pointer; border: 2px solid #fff;
   }
   .lmc-vol-val { font-size: 10px; color: #9A9EB0; font-variant-numeric: tabular-nums; width: 30px; text-align: right; flex-shrink: 0; }
+
+  /* Waiting room screen */
+  .lmc-waiting-icon-wrap {
+    width: 68px; height: 68px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; margin-bottom: 6px;
+  }
+  .lmc-waiting-icon-wrap.waiting {
+    background: #EEF2FF; border: 1.5px solid #C7D2FE;
+    box-shadow: 0 0 0 8px rgba(99,102,241,0.08);
+  }
+  .lmc-waiting-icon-wrap.rejected {
+    background: #FEE2E2; border: 1.5px solid #FECACA;
+    box-shadow: 0 0 0 8px rgba(220,38,38,0.08);
+  }
+  .lmc-waiting-details {
+    width: 100%; background: #F8F9FD; border: 1px solid #ECEEF7;
+    border-radius: 14px; padding: 14px 16px; margin-top: 18px;
+    display: flex; flex-direction: column; gap: 8px; box-sizing: border-box;
+  }
+  .lmc-waiting-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px;
+  }
+  .lmc-waiting-label { color: #8F93A3; font-weight: 500; }
+  .lmc-waiting-val { color: #1E202B; font-weight: 600; }
+  .lmc-waiting-leave-btn {
+    width: 100%; border-radius: 999px; padding: 10px 16px;
+    background: #14151B; color: #fff; font-size: 12.5px; font-weight: 700;
+    border: none; cursor: pointer; transition: all 0.15s ease;
+  }
+  .lmc-waiting-leave-btn:hover { background: #2A2C38; transform: translateY(-1px); }
+
+  /* Host admission knock banner */
+  .lmc-knock-banner {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 25; width: min(520px, 90%);
+    background: rgba(20, 21, 27, 0.94); backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 16px;
+    padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    box-shadow: 0 16px 36px rgba(0,0,0,0.45);
+  }
+  .lmc-knock-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .lmc-knock-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #4A63E8, #7C6BEA);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0;
+  }
+  .lmc-knock-name { font-size: 12.5px; color: #F4F4F6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lmc-knock-name strong { color: #fff; }
+  .lmc-knock-sub { font-size: 10.5px; color: #9A9EB0; margin-top: 1px; }
+  .lmc-knock-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .lmc-knock-admit {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #00C88A; color: #04251B; border: none; border-radius: 999px;
+    padding: 6px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .lmc-knock-admit:hover { background: #00E6A8; transform: scale(1.03); }
+  .lmc-knock-deny {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.1); color: #E0E2EC; border: none; border-radius: 999px;
+    padding: 6px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .lmc-knock-deny:hover { background: rgba(220,38,38,0.3); color: #FFB3B3; }
+
+  /* Toast notification */
+  .lmc-unlock-toast {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 30; background: #14151B; color: #fff;
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 999px;
+    padding: 8px 18px; font-size: 12px; font-weight: 600;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.35); display: flex; align-items: center; gap: 8px;
+    animation: lmcFadeUp 0.25s ease both;
+  }
+
+  .lmc-export-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #F2F3F6; border: 1px solid #E7E8EE;
+    border-radius: 999px; padding: 6px 12px;
+    font-size: 12px; color: #3A3C46; font-weight: 600;
+    text-decoration: none; cursor: pointer; transition: all 0.15s ease;
+  }
+  .lmc-export-btn:hover { background: #E7E8EE; color: #14151B; transform: translateY(-1px); }
 `;
 
 /* ---------------- small helper components ---------------- */
@@ -602,6 +689,113 @@ export default function LiveMeetingCall({
   const [generationPercent, setGenerationPercent] = useState(0);
   const [generationAgent, setGenerationAgent] = useState("");
   const [cancellingGen, setCancellingGen] = useState(false);
+
+  // Host Admission / Waiting Room System
+  const [admissionStatus, setAdmissionStatus] = useState(isHost ? "approved" : "checking"); // checking | pending | approved | rejected
+  const [pendingKnocks, setPendingKnocks] = useState([]);
+  const [unlockToast, setUnlockToast] = useState("");
+
+  // Participant waiting room admission check & knocking
+  useEffect(() => {
+    if (isHost || !meetingId) return undefined;
+    let cancelled = false;
+    let pollTimer = null;
+
+    const requestAdmission = async () => {
+      try {
+        const res = await meetingsApi.requestJoin(meetingId);
+        if (cancelled) return;
+        if (res.status === "approved" || res.admitted) {
+          setAdmissionStatus("approved");
+          return;
+        }
+        setAdmissionStatus("pending");
+        // Start polling status every 2 seconds
+        pollTimer = setInterval(async () => {
+          try {
+            const statusRes = await meetingsApi.checkJoinStatus(meetingId);
+            if (cancelled) return;
+            if (statusRes.status === "approved" || statusRes.admitted) {
+              setAdmissionStatus("approved");
+              clearInterval(pollTimer);
+            } else if (statusRes.status === "rejected") {
+              setAdmissionStatus("rejected");
+              clearInterval(pollTimer);
+            }
+          } catch (err) {
+            console.warn("Poll join status error:", err);
+          }
+        }, 2000);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Admission knock error:", err);
+        setAdmissionStatus("pending");
+      }
+    };
+
+    requestAdmission();
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, [isHost, meetingId]);
+
+  // Host polls pending knocks periodically
+  useEffect(() => {
+    if (!isHost || !meetingId) return undefined;
+    let cancelled = false;
+
+    const fetchKnocks = async () => {
+      try {
+        const res = await meetingsApi.listJoinRequests(meetingId);
+        if (!cancelled && Array.isArray(res.requests)) {
+          setPendingKnocks(res.requests);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    fetchKnocks();
+    const timer = setInterval(fetchKnocks, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isHost, meetingId]);
+
+  const handleApproveKnock = async (userId, name) => {
+    try {
+      await meetingsApi.approveJoinRequest(meetingId, userId);
+      setPendingKnocks((prev) => prev.filter((k) => k.user_id !== userId));
+      setUnlockToast(`✅ Admitted ${name || "participant"} to the call`);
+      setTimeout(() => setUnlockToast(""), 3500);
+    } catch (err) {
+      console.warn("Failed to approve join request:", err);
+    }
+  };
+
+  const handleRejectKnock = async (userId, name) => {
+    try {
+      await meetingsApi.rejectJoinRequest(meetingId, userId);
+      setPendingKnocks((prev) => prev.filter((k) => k.user_id !== userId));
+      setUnlockToast(`❌ Declined request from ${name || "participant"}`);
+      setTimeout(() => setUnlockToast(""), 3500);
+    } catch (err) {
+      console.warn("Failed to reject join request:", err);
+    }
+  };
+
+  // Toast alert when prototype transitions to ready
+  const prevProtoReadyRef = useRef(prototypeReady);
+  useEffect(() => {
+    if (!prevProtoReadyRef.current && prototypeReady) {
+      setUnlockToast("🎉 Prototype Unlocked! The interactive prototype has been successfully generated.");
+      setTimeout(() => setUnlockToast(""), 5000);
+    }
+    prevProtoReadyRef.current = prototypeReady;
+  }, [prototypeReady]);
 
   const [connectionState, setConnectionState] = useState("connecting"); // connecting | connected | error
   const [connectionError, setConnectionError] = useState("");
@@ -705,6 +899,11 @@ export default function LiveMeetingCall({
     if (!meetingId) {
       setConnectionState("error");
       setConnectionError("No meeting to join — meetingId is missing.");
+      return undefined;
+    }
+
+    // Host admission gate: Participant must be approved before connecting to LiveKit
+    if (admissionStatus !== "approved") {
       return undefined;
     }
 
@@ -834,7 +1033,7 @@ export default function LiveMeetingCall({
       room.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meetingId]);
+  }, [meetingId, admissionStatus]);
 
   // Elapsed-time ticker
   useEffect(() => {
@@ -898,6 +1097,17 @@ export default function LiveMeetingCall({
             ...prev,
             ...data.new.map((r) => ({ id: r.id, text: r.title, status: r.status })),
           ]);
+        } else if (data.type === "knock" && isHost && data.request) {
+          setPendingKnocks((prev) => {
+            if (prev.some((k) => k.user_id === data.request.user_id)) return prev;
+            return [...prev, data.request];
+          });
+        } else if ((data.type === "knock_approved" || data.type === "knock_rejected") && isHost) {
+          setPendingKnocks((prev) => prev.filter((k) => k.user_id !== data.user_id));
+        } else if (data.type === "knock_approved" && !isHost && data.user_id === currentUser?.id) {
+          setAdmissionStatus("approved");
+        } else if (data.type === "knock_rejected" && !isHost && data.user_id === currentUser?.id) {
+          setAdmissionStatus("rejected");
         } else if (data.type === "error") {
           setFeedState("failed");
           setFeedError(data.message || "Transcript feed error.");
@@ -1248,6 +1458,9 @@ export default function LiveMeetingCall({
   const handleGenerate = () => {
     if (!canGenerate) return;
     setGenerating(true);
+    setGenerationRunning(true);
+    setUnlockToast("🚀 Generation Started! Pipeline is now unlocked and assembling your prototype.");
+    setTimeout(() => setUnlockToast(""), 4500);
     onGeneratePrototype?.(points.filter((p) => p.status === "approved"));
     setTimeout(() => setGenerating(false), 1600);
   };
@@ -1261,12 +1474,114 @@ export default function LiveMeetingCall({
 
   const pinnedMainTrack = pinned?.screenTrack || pinned?.videoTrack || null;
 
+  // Participant waiting room view (rendered while awaiting host admission)
+  if (!isHost && admissionStatus !== "approved") {
+    const isRejected = admissionStatus === "rejected";
+    return (
+      <div className="lmc-root">
+        <style>{styles}</style>
+        <div className="lmc-frame lmc-fade-up" style={{ maxWidth: 460, height: "auto" }}>
+          <div className="lmc-card" style={{ padding: "34px 28px", textAlign: "center", alignItems: "center" }}>
+            <div className={`lmc-waiting-icon-wrap ${isRejected ? "rejected" : "waiting"}`}>
+              {isRejected ? <ShieldAlert size={34} color="#DC2626" /> : <UserCheck size={34} color="#4A63E8" />}
+            </div>
+
+            <div style={{ fontSize: 19, fontWeight: 800, color: "#14151B", marginTop: 16 }}>
+              {isRejected ? "Entry Declined" : "Waiting for Host Approval"}
+            </div>
+
+            <div style={{ fontSize: 13, color: "#767A8C", marginTop: 8, lineHeight: 1.55, maxWidth: 360 }}>
+              {isRejected
+                ? "The meeting host has declined your request to join this session."
+                : "You've requested to enter this meeting. You'll be admitted as soon as the host approves your request."}
+            </div>
+
+            <div className="lmc-waiting-details">
+              <div className="lmc-waiting-row">
+                <span className="lmc-waiting-label">Meeting</span>
+                <span className="lmc-waiting-val">{meetingTitle}</span>
+              </div>
+              <div className="lmc-waiting-row">
+                <span className="lmc-waiting-label">Meeting Code</span>
+                <span className="lmc-waiting-val" style={{ fontFamily: "monospace", fontSize: 11 }}>{meetingId}</span>
+              </div>
+              <div className="lmc-waiting-row">
+                <span className="lmc-waiting-label">Your Account</span>
+                <span className="lmc-waiting-val">{currentUser?.name || currentUser?.email || "Participant"}</span>
+              </div>
+            </div>
+
+            {!isRejected && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#4A63E8", fontWeight: 600, marginTop: 18 }}>
+                <Loader2 size={15} className="lmc-spin" />
+                <span>Host will admit you shortly…</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="lmc-waiting-leave-btn"
+              onClick={onHangUp || onBack}
+              style={{ marginTop: 22 }}
+            >
+              {isRejected ? "Back to Dashboard" : "Leave Waiting Room"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="lmc-root">
       <style>{styles}</style>
 
       <div className="lmc-frame lmc-fade-up">
-        <div className="lmc-card">
+        <div className="lmc-card" style={{ position: "relative" }}>
+
+          {/* Host Knock / Admission Banner */}
+          {isHost && pendingKnocks.length > 0 && (
+            <div className="lmc-knock-banner lmc-fade-up">
+              <div className="lmc-knock-info">
+                <div className="lmc-knock-avatar">
+                  {(pendingKnocks[0].name || "P")[0].toUpperCase()}
+                </div>
+                <div>
+                  <div className="lmc-knock-name">
+                    <strong>{pendingKnocks[0].name || "Guest"}</strong> ({pendingKnocks[0].email || "Participant"}) wants to enter
+                  </div>
+                  <div className="lmc-knock-sub">
+                    Waiting room · {pendingKnocks.length} request{pendingKnocks.length > 1 ? "s" : ""} waiting
+                  </div>
+                </div>
+              </div>
+              <div className="lmc-knock-actions">
+                <button
+                  type="button"
+                  className="lmc-knock-deny"
+                  onClick={() => handleRejectKnock(pendingKnocks[0].user_id, pendingKnocks[0].name)}
+                  title="Decline join request"
+                >
+                  <X size={13} /> Decline
+                </button>
+                <button
+                  type="button"
+                  className="lmc-knock-admit"
+                  onClick={() => handleApproveKnock(pendingKnocks[0].user_id, pendingKnocks[0].name)}
+                  title="Admit participant into call"
+                >
+                  <Check size={13} /> Admit
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Unlock / Action Toast */}
+          {unlockToast && (
+            <div className="lmc-unlock-toast">
+              <span>{unlockToast}</span>
+            </div>
+          )}
 
           {/* ---------- Top bar ---------- */}
           <div className="lmc-topbar" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
@@ -1280,41 +1595,51 @@ export default function LiveMeetingCall({
               </div>
             </div>
 
-            <div
-              className="lmc-pill"
-              style={{ cursor: "pointer" }}
-              onClick={async () => {
-                if (!meetingId) return;
-                const copied = await copyTextToClipboard(meetingId);
-                if (copied) {
-                  setIdCopied(true);
-                  setTimeout(() => setIdCopied(false), 1500);
-                }
-              }}
-              title="Copy meeting ID to share with others"
-            >
-              <span>{idCopied ? "Copied — share this to let others join" : meetingId}</span>
-              <div className="lmc-pill-btn" style={{ background: "#14151B", color: "#fff" }}>
-                <Copy size={12} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <a
+                href={meetingsApi.exportTranscriptUrl(meetingId)}
+                target="_blank"
+                rel="noreferrer"
+                download={`meeting-${meetingId}-notes.md`}
+                className="lmc-export-btn"
+                title="Download meeting transcript, translations, and approved requirements (.md)"
+              >
+                <FileDown size={13} />
+                <span>Export Notes</span>
+              </a>
+
+              <div
+                className="lmc-pill"
+                style={{ cursor: "pointer" }}
+                onClick={async () => {
+                  if (!meetingId) return;
+                  const copied = await copyTextToClipboard(meetingId);
+                  if (copied) {
+                    setIdCopied(true);
+                    setTimeout(() => setIdCopied(false), 1500);
+                  }
+                }}
+                title="Copy meeting ID to share with others"
+              >
+                <span>{idCopied ? "Copied — share this to let others join" : meetingId}</span>
+                <div className="lmc-pill-btn" style={{ background: "#14151B", color: "#fff" }}>
+                  <Copy size={12} />
+                </div>
               </div>
             </div>
           </div>
 
-          {/* ---------- Host-only page nav: locked until the prototype exists ----------
-              Only the meeting's creator sees this. AI Workforce / Pipeline / Prototype
-              stay locked until a prototype has actually been generated, so nobody opens
-              an empty screen. Clients don't need it — the host shows the built prototype
-              over screen-share. */}
+          {/* ---------- Host-only page nav: Live unlocking as phases complete ---------- */}
           {isHost && (
             <div className="lmc-navtabs">
               {[
                 { key: "meeting", label: "Meeting", icon: Radio, active: true },
-                { key: "workforce", label: "AI Workforce", icon: Cpu, onClick: onOpenWorkforce },
-                { key: "pipeline", label: "Pipeline", icon: GitBranch, onClick: onOpenPipeline },
-                { key: "prototype", label: "Prototype", icon: Eye, onClick: onViewPrototype },
+                { key: "workforce", label: "AI Workforce", icon: Cpu, onClick: onOpenWorkforce, unlocked: true },
+                { key: "pipeline", label: "Pipeline", icon: GitBranch, onClick: onOpenPipeline, unlocked: generationRunning || prototypeReady },
+                { key: "prototype", label: "Prototype", icon: Eye, onClick: onViewPrototype, unlocked: prototypeReady },
               ].map((t) => {
                 const isPipelineRunning = t.key === "pipeline" && generationRunning;
-                const locked = !t.active && !prototypeReady && !isPipelineRunning;
+                const locked = !t.active && !t.unlocked;
                 return (
                   <button
                     key={t.key}
@@ -1324,7 +1649,9 @@ export default function LiveMeetingCall({
                     onClick={() => { if (!t.active && !locked) t.onClick?.(); }}
                     title={
                       locked
-                        ? "Unlocks once you generate the prototype"
+                        ? t.key === "prototype"
+                          ? "Locked: Generate a prototype to unlock the viewer"
+                          : "Locked until generation starts"
                         : isPipelineRunning
                         ? `Generation running (${generationPercent}%) — click to view live progress`
                         : t.label
@@ -1335,6 +1662,11 @@ export default function LiveMeetingCall({
                     {isPipelineRunning && (
                       <span className="lmc-navtab-badge active-run">
                         <Loader2 size={10} className="lmc-spin" /> {generationPercent}%
+                      </span>
+                    )}
+                    {t.key === "prototype" && prototypeReady && (
+                      <span className="lmc-navtab-badge" style={{ background: "rgba(0, 230, 168, 0.18)", color: "#008761" }}>
+                        Ready
                       </span>
                     )}
                     {locked && <Lock size={11} className="lmc-navtab-lock" />}

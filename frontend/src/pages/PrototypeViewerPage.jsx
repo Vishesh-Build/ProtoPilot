@@ -178,6 +178,126 @@ const NAV_TABS = [
   { label: "Prototype Viewer", icon: Eye, active: true },
 ];
 
+const SAMPLE_PROTOTYPE_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinTrack AI — Smart Expense Analytics</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0B0F19; color: #F3F4F6; }
+    .glass { background: rgba(18, 24, 38, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .grad-btn { background: linear-gradient(135deg, #4A63E8, #00C88A); }
+  </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+  <header class="flex items-center justify-between pb-6 border-b border-gray-800">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl grad-btn flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">FT</div>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight">FinTrack AI</h1>
+        <p class="text-xs text-gray-400">Autonomous SaaS Expense Optimization</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">● Live AI Engine</span>
+      <button class="px-4 py-2 rounded-xl text-xs font-bold grad-btn text-white shadow-md hover:opacity-95 transition" onclick="alert('Exporting audit report...')">Download Audit</button>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 my-6">
+    <div class="glass p-5 rounded-2xl">
+      <div class="text-xs text-gray-400 font-medium">Monthly Active Burn</div>
+      <div class="text-2xl font-bold mt-1 text-white">$48,250</div>
+      <div class="text-xs text-emerald-400 mt-2 font-semibold">↓ 14.2% from last month</div>
+    </div>
+    <div class="glass p-5 rounded-2xl">
+      <div class="text-xs text-gray-400 font-medium">AI Identified Leakage</div>
+      <div class="text-2xl font-bold mt-1 text-amber-400">$6,840</div>
+      <div class="text-xs text-gray-400 mt-2">7 redundant subscriptions</div>
+    </div>
+    <div class="glass p-5 rounded-2xl">
+      <div class="text-xs text-gray-400 font-medium">Projected Annual Savings</div>
+      <div class="text-2xl font-bold mt-1 text-emerald-400">$82,080</div>
+      <div class="text-xs text-emerald-400 mt-2 font-semibold">⚡ Autopilot enabled</div>
+    </div>
+    <div class="glass p-5 rounded-2xl">
+      <div class="text-xs text-gray-400 font-medium">Runway Extension</div>
+      <div class="text-2xl font-bold mt-1 text-indigo-400">+4.2 Mo</div>
+      <div class="text-xs text-gray-400 mt-2">Based on current revenue growth</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="glass p-6 rounded-2xl lg:col-span-2">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-bold uppercase tracking-wider text-gray-400">Subscription Health & Redundancies</h2>
+        <span class="text-xs text-indigo-400 font-semibold cursor-pointer">View All</span>
+      </div>
+      <div class="space-y-3" id="sub-list">
+        <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-900/60 border border-gray-800">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-xs">F</div>
+            <div>
+              <div class="text-sm font-semibold">Figma Enterprise (Duplicate Org)</div>
+              <div class="text-xs text-gray-400">12 idle seats unused for 90 days</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-red-400">$1,800/mo</div>
+            <button class="text-xs text-indigo-400 font-semibold hover:underline" onclick="this.parentElement.parentElement.remove()">Consolidate</button>
+          </div>
+        </div>
+        <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-900/60 border border-gray-800">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs">A</div>
+            <div>
+              <div class="text-sm font-semibold">AWS Reserved Instance Mismatch</div>
+              <div class="text-xs text-gray-400">Unused GPU nodes in us-east-1</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-amber-400">$2,450/mo</div>
+            <button class="text-xs text-indigo-400 font-semibold hover:underline" onclick="this.parentElement.parentElement.remove()">Downscale</button>
+          </div>
+        </div>
+        <div class="flex items-center justify-between p-3.5 rounded-xl bg-gray-900/60 border border-gray-800">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs">N</div>
+            <div>
+              <div class="text-sm font-semibold">Notion AI Workspaces</div>
+              <div class="text-xs text-gray-400">Optimized plan active</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-emerald-400">$480/mo</div>
+            <span class="text-xs text-emerald-500 font-medium">Optimal</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass p-6 rounded-2xl">
+      <h2 class="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">AI Agent Recommendations</h2>
+      <div class="space-y-4">
+        <div class="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+          <div class="text-xs font-bold text-indigo-300">Automated Seat Reclaiming</div>
+          <p class="text-xs text-gray-300 mt-1">Found 18 licenses across GitHub, Slack and Figma that can be paused immediately.</p>
+          <button class="mt-3 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition w-full" onclick="alert('Licenses paused successfully!')">Execute Reclaim</button>
+        </div>
+        <div class="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+          <div class="text-xs font-bold text-emerald-300">Annual Discount Lock-In</div>
+          <p class="text-xs text-gray-300 mt-1">Switching Datadog and Segment to annual terms unlocks $14,200 discount.</p>
+          <button class="mt-3 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition w-full" onclick="alert('Discount request dispatched!')">Apply Annual Rate</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
 export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavigate }) {
   const [device, setDevice] = useState("desktop");
   const [status, setStatus] = useState("loading"); // loading | no-meeting | not-ready | ready
@@ -199,6 +319,12 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
 
   useEffect(() => {
     if (!meetingId) { setStatus("no-meeting"); return; }
+    if (meetingId === "demo-sample") {
+      setPrototypeHtml(SAMPLE_PROTOTYPE_HTML);
+      setStatus("ready");
+      setExportReady(true);
+      return;
+    }
     let cancelled = false;
 
     meetingsApi.agentOutputs(meetingId)

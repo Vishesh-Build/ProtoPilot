@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Radio, Check, Loader2, Circle, ChevronRight, Terminal, Link2,
   LayoutDashboard, Users, Cpu, GitBranch, Eye,
-  Settings, Bell, Command, FileCode2, Boxes, Rocket, Clock, Package, AlertCircle, Square,
+  Settings, Bell, Command, FileCode2, Boxes, Rocket, Clock, Package, AlertCircle, Square, Lock,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
 import { meetingsApi } from "../lib/api.js";
@@ -445,20 +445,36 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
           <div className="gp-nav-mark"><img src="/logo.png" alt="ProtoPilot" /></div>
         </div>
         <div className="gp-nav-tabs">
-          {NAV_TABS.map((t) => (
-            <div
-              key={t.label}
-              className={`gp-nav-tab ${t.active ? "active" : ""}`}
-              onClick={() => {
-                if (t.label === "Dashboard") onNavigate?.("dashboard");
-                if (t.label === "Meeting Workspace") onNavigate?.("live");
-                if (t.label === "AI Workforce") onNavigate?.("workforce");
-                if (t.label === "Prototype Viewer") onNavigate?.("viewer");
-              }}
-            >
-              <t.icon size={13} /> {t.label}
-            </div>
-          ))}
+          {NAV_TABS.map((t) => {
+            const isViewer = t.label === "Prototype Viewer";
+            const isViewerReady = Boolean(outputs.prototype || (finished && !isCancelled && failedCount === 0));
+            const isLocked = isViewer && !isViewerReady;
+
+            return (
+              <div
+                key={t.label}
+                className={`gp-nav-tab ${t.active ? "active" : ""}`}
+                style={isLocked ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
+                title={isLocked ? "Prototype Builder stage is running — unlocks once complete" : t.label}
+                onClick={() => {
+                  if (isLocked) return;
+                  if (t.label === "Dashboard") onNavigate?.("dashboard");
+                  if (t.label === "Meeting Workspace") onNavigate?.("live");
+                  if (t.label === "AI Workforce") onNavigate?.("workforce");
+                  if (t.label === "Prototype Viewer") onNavigate?.("viewer");
+                }}
+              >
+                <t.icon size={13} />
+                <span>{t.label}</span>
+                {isViewer && isLocked && <Lock size={11} style={{ marginLeft: 2, opacity: 0.7 }} />}
+                {isViewer && isViewerReady && (
+                  <span style={{ fontSize: 9.5, fontWeight: 700, background: "#E4F8EF", color: "#17A56A", padding: "1px 6px", borderRadius: 999, marginLeft: 2 }}>
+                    Ready
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
         <div className="gp-nav-meta">
           <span>

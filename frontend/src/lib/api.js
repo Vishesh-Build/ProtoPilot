@@ -246,6 +246,23 @@ export const meetingsApi = {
 
   delete: (meetingId) => request(`/meetings/${meetingId}`, { method: "DELETE" }),
 
+  requestJoin: (meetingId) =>
+    request(`/meetings/${meetingId}/join-requests`, { method: "POST" }),
+
+  checkJoinStatus: (meetingId) =>
+    request(`/meetings/${meetingId}/join-requests/status`),
+
+  listJoinRequests: (meetingId) =>
+    request(`/meetings/${meetingId}/join-requests`),
+
+  approveJoinRequest: (meetingId, userId) =>
+    request(`/meetings/${meetingId}/join-requests/${userId}/approve`, { method: "POST" }),
+
+  rejectJoinRequest: (meetingId, userId) =>
+    request(`/meetings/${meetingId}/join-requests/${userId}/reject`, { method: "POST" }),
+
+  exportTranscriptUrl: (meetingId) => `${API_BASE_URL}/meetings/${meetingId}/export-transcript`,
+
   agentOutputs: (meetingId) => request(`/meetings/${meetingId}/agent-outputs`),
 
   exportStatus: (meetingId) => request(`/meetings/${meetingId}/export/status`),

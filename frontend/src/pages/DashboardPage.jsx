@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Users, Cpu, GitBranch, Eye,
   Settings, Bell, Command, CheckCircle2, Loader2, FileClock,
   Sparkles, Zap, Layers, TrendingUp, AlertCircle, LogIn, X, Trash2, Pencil,
+  FileDown, ShieldCheck, Mail, User, LogOut,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
 import { meetingsApi } from "../lib/api.js";
@@ -155,6 +156,22 @@ const styles = `
     transition: all 0.15s ease;
   }
   .db-join-btn:hover { background: rgba(74,99,232,0.08); }
+  .db-demo-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(124,107,234,0.12); color: #7C6BEA;
+    border: 1px solid rgba(124,107,234,0.3); border-radius: 999px;
+    padding: 8px 16px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .db-demo-btn:hover { background: rgba(124,107,234,0.2); transform: translateY(-1px); }
+
+  .db-download-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; color: #4A63E8; background: #EFF2FF;
+    border: 1px solid #C7D0F5; border-radius: 999px; cursor: pointer;
+    flex-shrink: 0; text-decoration: none; transition: all 0.15s ease;
+  }
+  .db-download-btn:hover { background: #4A63E8; color: #fff; transform: translateY(-1px); }
 
   .db-modal-overlay {
     position: fixed; inset: 0; z-index: 100;
@@ -233,6 +250,16 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
   const [joinId, setJoinId] = useState("");
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinError, setJoinError] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  const handleExploreDemo = () => {
+    const withProto = meetings.find((m) => m.has_prototype);
+    if (withProto) {
+      onOpenPrototype?.(withProto.meeting_id);
+    } else {
+      onOpenPrototype?.("demo-sample");
+    }
+  };
 
   // Delete-a-meeting confirm flow. Deletion is permanent (the backend wipes the
   // transcript, requirements and generated prototype), so it always goes through
@@ -371,7 +398,11 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
           ))}
         </div>
         <div className="db-nav-meta">
-          <div className="db-avatar-pill" title={currentUser ? `${currentUser.name} — click to sign out` : ""} onClick={onLogout}>
+          <div
+            className="db-avatar-pill"
+            title={currentUser ? `${currentUser.name} — View Account Profile` : "Account Profile"}
+            onClick={() => setProfileOpen(true)}
+          >
             {(currentUser?.name || "?")[0]?.toUpperCase()}
           </div>
         </div>
@@ -424,6 +455,14 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
                 <button className="db-join-btn" onClick={() => { setJoinError(null); setJoinOpen(true); }}>
                   <LogIn size={13} /> Join meeting
                 </button>
+                <button
+                  type="button"
+                  className="db-demo-btn"
+                  onClick={handleExploreDemo}
+                  title="Explore pre-built interactive demo prototype"
+                >
+                  <Sparkles size={12} /> Explore Demo Project
+                </button>
               </div>
               <div className="db-cta-illustration">
                 <svg width="64" height="64" viewBox="0 0 64 64">
@@ -468,6 +507,16 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
                     <button className="db-resume-btn" onClick={() => onResumeMeeting?.(m.meeting_id)}>
                       <Play size={12} /> Resume
                     </button>
+                    <a
+                      href={meetingsApi.exportTranscriptUrl(m.meeting_id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      download={`meeting-${m.meeting_id}-notes.md`}
+                      className="db-download-btn"
+                      title="Download meeting transcript, translations & requirements (.md)"
+                    >
+                      <FileDown size={13} />
+                    </a>
                     <button
                       className="db-rename-btn"
                       title="Rename this meeting"
@@ -600,6 +649,76 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
               {renameBusy ? <Loader2 size={14} className="wf-spin" /> : <Pencil size={14} />}
               {renameBusy ? "Saving…" : "Save name"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {profileOpen && (
+        <div className="db-modal-overlay" onClick={() => setProfileOpen(false)}>
+          <div className="db-modal-card" style={{ width: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div className="db-modal-head">
+              <div className="db-modal-title">Account Profile</div>
+              <X size={16} className="db-modal-close" onClick={() => setProfileOpen(false)} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 0 10px" }}>
+              <div
+                style={{
+                  width: 58, height: 58, borderRadius: "50%",
+                  background: "linear-gradient(135deg, #7C6BEA, #4A63E8)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontSize: 22, fontWeight: 800,
+                  boxShadow: "0 8px 24px rgba(74,99,232,0.28)",
+                }}
+              >
+                {(currentUser?.name || "U")[0]?.toUpperCase()}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#14151B", marginTop: 12 }}>
+                {currentUser?.name || "ProtoPilot User"}
+              </div>
+              <div style={{ fontSize: 12.5, color: "#767A8C", marginTop: 2 }}>
+                {currentUser?.email || "No email"}
+              </div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#E4F8EF", color: "#17A56A", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, marginTop: 8 }}>
+                <ShieldCheck size={13} /> Verified Account
+              </div>
+            </div>
+
+            <div style={{ background: "#F8F9FD", border: "1px solid #ECEEF7", borderRadius: 12, padding: "12px 14px", margin: "10px 0 16px", display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#5B5F70" }}>
+                <span>Account Role</span>
+                <strong style={{ color: "#14151B" }}>Workspace Host & Creator</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#5B5F70" }}>
+                <span>Total Meetings Hosted</span>
+                <strong style={{ color: "#14151B" }}>{meetings.length}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#5B5F70" }}>
+                <span>Shipped Prototypes</span>
+                <strong style={{ color: "#14151B" }}>{prototypesShipped}</strong>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                className="db-modal-submit db-modal-danger"
+                style={{ flex: 1, marginTop: 0 }}
+                onClick={() => {
+                  setProfileOpen(false);
+                  onLogout?.();
+                }}
+              >
+                <LogOut size={14} /> Sign out
+              </button>
+              <button
+                type="button"
+                className="db-modal-submit"
+                style={{ flex: 1, marginTop: 0, background: "#F2F3F6", color: "#14151B" }}
+                onClick={() => setProfileOpen(false)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
