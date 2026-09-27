@@ -90,3 +90,35 @@ async def update_title(
     if updated is None:
         raise HTTPException(status_code=404, detail=f"No requirement with id={requirement_id}")
     return {"requirement": updated.__dict__}
+
+
+class PriorityUpdate(BaseModel):
+    priority: str  # "High" | "Medium" | "Low"
+
+
+@router.patch("/{meeting_id}/requirements/{requirement_id}/priority")
+async def update_priority(
+    requirement_id: int,
+    body: PriorityUpdate,
+    session: MeetingSession = Depends(require_meeting_host),
+):
+    """Edit a requirement's priority (High / Medium / Low) — host only."""
+    p = body.priority.capitalize()
+    if p not in {"High", "Medium", "Low"}:
+        raise HTTPException(status_code=422, detail="priority must be High, Medium, or Low")
+    updated = session.update_requirement_priority(requirement_id, p)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"No requirement with id={requirement_id}")
+    return {"requirement": updated.__dict__}
+
+
+@router.delete("/{meeting_id}/requirements/{requirement_id}")
+async def delete_requirement(
+    requirement_id: int,
+    session: MeetingSession = Depends(require_meeting_host),
+):
+    """Permanently delete a requirement — host only."""
+    ok = session.delete_requirement(requirement_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"No requirement with id={requirement_id}")
+    return {"deleted": True, "requirement_id": requirement_id, "readiness_percent": session.readiness_percent()}

@@ -4,7 +4,7 @@ import {
   Monitor, Tablet, Smartphone,
   RefreshCw, ExternalLink, ChevronRight,
   Layers, Clock, Sparkles, Copy, Check, Link2, AlertCircle, Download, Loader2,
-  Maximize2, Minimize2,
+  Maximize2, Minimize2, Share2, Send, FileCode, CheckCircle2,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
 import { meetingsApi } from "../lib/api.js";
@@ -160,6 +160,128 @@ const styles = `
   .pv-export-btn:hover { transform: translateY(-1px); }
   .pv-export-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+  .pv-export-btn-secondary {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 12px; font-weight: 650; color: #3A3C46;
+    background: #F4F6FC; border: 1px solid #E1E4F0; border-radius: 10px;
+    padding: 9.5px; cursor: pointer; transition: all 0.15s ease;
+  }
+  .pv-export-btn-secondary:hover { background: #EAEFFC; border-color: #B9C3F8; color: #23359E; }
+  .pv-export-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .pv-share-box {
+    background: #F8F9FD; border: 1px solid #ECEEF7; border-radius: 10px;
+    padding: 8px 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .pv-share-url-text {
+    flex: 1; font-size: 11px; color: #696E82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
+  }
+  .pv-copy-mini-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 6px;
+    background: #fff; border: 1px solid #DFE2EE; cursor: pointer; color: #4A63E8;
+    transition: all 0.15s ease; flex-shrink: 0;
+  }
+  .pv-copy-mini-btn:hover { background: #4A63E8; color: #fff; border-color: #4A63E8; }
+
+  .pv-tweak-container {
+    margin-top: 14px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 860px;
+    align-self: center;
+    z-index: 10;
+  }
+  .pv-tweak-form {
+    width: 100%;
+  }
+  .pv-tweak-inner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1.5px solid rgba(210, 215, 238, 0.95);
+    border-radius: 999px;
+    padding: 6px 8px 6px 16px;
+    box-shadow: 0 10px 30px rgba(45, 52, 100, 0.10), 0 2px 8px rgba(0,0,0,0.03);
+    transition: all 0.2s ease;
+  }
+  .pv-tweak-inner:focus-within {
+    border-color: #4A63E8;
+    box-shadow: 0 12px 36px rgba(74, 99, 232, 0.22), 0 0 0 3px rgba(74,99,232,0.12);
+    background: #fff;
+  }
+  .pv-tweak-sparkle {
+    color: #4A63E8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .pv-tweak-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 12.5px;
+    color: #14151B;
+    font-family: inherit;
+    font-weight: 500;
+  }
+  .pv-tweak-input::placeholder {
+    color: #9599AA;
+  }
+  .pv-tweak-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #4A63E8, #7C6BEA);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(74, 99, 232, 0.3);
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+  .pv-tweak-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(74, 99, 232, 0.42);
+  }
+  .pv-tweak-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .pv-tweak-toast {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 999px;
+  }
+  .pv-tweak-toast.success {
+    background: #EEFBF3;
+    color: #17A56A;
+    border: 1px solid #CDEEDA;
+  }
+  .pv-tweak-toast.error {
+    background: #FDF3F3;
+    color: #E14B4B;
+    border: 1px solid #F5D9D9;
+  }
+
   .pv-agent-chip { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: #3A3C46; padding: 5px 0; }
   .pv-agent-dot { width: 7px; height: 7px; border-radius: 50%; background: #00C88A; flex-shrink: 0; }
 `;
@@ -306,6 +428,11 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
   const [exportReady, setExportReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [tweakPrompt, setTweakPrompt] = useState("");
+  const [isTweaking, setIsTweaking] = useState(false);
+  const [tweakSuccess, setTweakSuccess] = useState(false);
+  const [tweakError, setTweakError] = useState(null);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -392,6 +519,64 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
     }
   };
 
+  const handleShareLink = async () => {
+    if (!meetingId) return;
+    const url = meetingsApi.publicPrototypeUrl(meetingId);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = url;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  const handleDownloadHtml = () => {
+    if (!prototypeHtml) return;
+    const blob = new Blob([prototypeHtml], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `protopilot-${(meetingId || "preview").slice(0, 8)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleTweak = async (e) => {
+    e?.preventDefault();
+    const prompt = tweakPrompt.trim();
+    if (!prompt || isTweaking || !meetingId) return;
+    setIsTweaking(true);
+    setTweakError(null);
+    setTweakSuccess(false);
+    try {
+      const res = await meetingsApi.tweakPrototype(meetingId, prompt);
+      if (res && res.prototype) {
+        setPrototypeHtml(res.prototype);
+        setTweakPrompt("");
+        setTweakSuccess(true);
+        setTimeout(() => setTweakSuccess(false), 3500);
+      } else {
+        throw new Error(res?.detail || "No prototype received from AI tweak");
+      }
+    } catch (err) {
+      setTweakError(err.message || "Failed to tweak prototype");
+    } finally {
+      setIsTweaking(false);
+    }
+  };
+
   const goTab = (label) => {
     if (label === "Dashboard") onNavigate?.("dashboard");
     if (label === "Meeting Workspace") onNavigate?.("live");
@@ -436,6 +621,23 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
             {status === "ready" && (
               <>
                 <div className="pv-tool-btn" title="Reload" onClick={() => window.location.reload()}><RefreshCw size={13} /></div>
+                <button
+                  type="button"
+                  className={`pv-tool-btn ${copiedLink ? "primary" : ""}`}
+                  title="Copy shareable link for anyone to test in any browser without logging in"
+                  onClick={handleShareLink}
+                >
+                  {copiedLink ? <Check size={13} /> : <Share2 size={13} />}
+                  {copiedLink ? "Link Copied!" : "Share Link"}
+                </button>
+                <button
+                  type="button"
+                  className="pv-tool-btn"
+                  title="Download standalone HTML file (opens anywhere on double-click)"
+                  onClick={handleDownloadHtml}
+                >
+                  <FileCode size={13} /> Download .html
+                </button>
                 <div className="pv-tool-btn" title="Open in default browser (Chrome / Edge)" onClick={openInBrowser}><ExternalLink size={13} /> Open in browser</div>
                 <div className="pv-tool-btn primary" onClick={toggleFullScreen}><Maximize2 size={13} /> Open full screen</div>
               </>
@@ -484,6 +686,53 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
               </div>
             )}
           </div>
+
+          {status === "ready" && (
+            <div className="pv-tweak-container">
+              <form onSubmit={handleTweak} className="pv-tweak-form">
+                <div className="pv-tweak-inner">
+                  <div className="pv-tweak-sparkle">
+                    <Sparkles size={16} />
+                  </div>
+                  <input
+                    type="text"
+                    className="pv-tweak-input"
+                    placeholder="Ask AI to tweak this prototype (e.g. 'Add a dark mode toggle', 'Add pricing table', 'Make hero bigger')..."
+                    value={tweakPrompt}
+                    onChange={(e) => setTweakPrompt(e.target.value)}
+                    disabled={isTweaking}
+                  />
+                  <button
+                    type="submit"
+                    className="pv-tweak-btn"
+                    disabled={!tweakPrompt.trim() || isTweaking}
+                  >
+                    {isTweaking ? (
+                      <>
+                        <Loader2 size={13} className="pv-spin" />
+                        <span>Refining…</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={13} />
+                        <span>Tweak</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+              {tweakSuccess && (
+                <div className="pv-tweak-toast success">
+                  <CheckCircle2 size={13} /> Prototype updated live with AI refinement!
+                </div>
+              )}
+              {tweakError && (
+                <div className="pv-tweak-toast error">
+                  <AlertCircle size={13} /> {tweakError}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="pv-side">
@@ -494,6 +743,40 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
           </div>
 
           <div className="pv-panel">
+            <div className="pv-panel-title"><Share2 size={12} /> Share & Test Online</div>
+            <div style={{ fontSize: 11.5, color: "#696E82", marginBottom: 8, lineHeight: 1.4 }}>
+              Anyone with this link can test the interactive prototype in their browser.
+            </div>
+            <div className="pv-share-box">
+              <span className="pv-share-url-text">{meetingId ? meetingsApi.publicPrototypeUrl(meetingId) : "—"}</span>
+              <button className="pv-copy-mini-btn" onClick={handleShareLink} title="Copy public link">
+                {copiedLink ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="pv-panel">
+            <div className="pv-panel-title"><Download size={12} /> Export Options</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#14151B", marginBottom: 3 }}>Standalone Prototype (.html)</div>
+                <div style={{ fontSize: 11, color: "#8E93A6", marginBottom: 6 }}>Single self-contained file. Double-click to run anywhere with zero setup.</div>
+                <button className="pv-export-btn-secondary" onClick={handleDownloadHtml} disabled={status !== "ready"}>
+                  <FileCode size={14} /> Download HTML (.html)
+                </button>
+              </div>
+              <div style={{ borderTop: "1px solid #ECEEF5", paddingTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#14151B", marginBottom: 3 }}>Full Developer Package (.zip)</div>
+                <div style={{ fontSize: 11, color: "#8E93A6", marginBottom: 6 }}>Includes PRD, System Architecture, Database Schemas, API specs & HTML.</div>
+                <button className="pv-export-btn" onClick={handleExport} disabled={!exportReady || downloading}>
+                  {downloading ? <Loader2 size={14} className="pv-spin" /> : <Download size={14} />}
+                  {downloading ? "Preparing…" : "Export as code (ZIP)"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="pv-panel">
             <div className="pv-panel-title"><Cpu size={12} /> Built by</div>
             <div className="pv-agent-chip"><span className="pv-agent-dot" /> UI — Interface Designer</div>
             <div className="pv-agent-chip"><span className="pv-agent-dot" /> API — API Layer</div>
@@ -501,14 +784,6 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
             <div className="pv-tool-btn" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={() => goTab("Generation Pipeline")}>
               <Link2 size={13} /> View build pipeline
             </div>
-          </div>
-
-          <div className="pv-panel">
-            <div className="pv-panel-title">Export</div>
-            <button className="pv-export-btn" onClick={handleExport} disabled={!exportReady || downloading}>
-              {downloading ? <Loader2 size={14} className="pv-spin" /> : <Download size={14} />}
-              {downloading ? "Preparing…" : "Export as code (ZIP)"}
-            </button>
           </div>
 
           <div className="pv-panel" style={{ display: "flex", alignItems: "center", gap: 9, color: "#9599AA", fontSize: 11.5 }}>
@@ -564,6 +839,25 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <button
+                type="button"
+                className="pv-tool-btn"
+                style={{ background: "rgba(255,255,255,0.1)", color: "#f3f4f6", borderColor: "rgba(255,255,255,0.15)" }}
+                onClick={handleShareLink}
+                title="Copy shareable link"
+              >
+                {copiedLink ? <Check size={13} color="#00E6A8" /> : <Share2 size={13} />}
+                {copiedLink ? "Link Copied!" : "Share Link"}
+              </button>
+              <button
+                type="button"
+                className="pv-tool-btn"
+                style={{ background: "rgba(255,255,255,0.1)", color: "#f3f4f6", borderColor: "rgba(255,255,255,0.15)" }}
+                onClick={handleDownloadHtml}
+                title="Download standalone HTML"
+              >
+                <FileCode size={13} /> Download .html
+              </button>
               <button
                 type="button"
                 className="pv-tool-btn"

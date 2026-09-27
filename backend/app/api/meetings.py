@@ -247,3 +247,82 @@ async def export_meeting_transcript(meeting_id: str, current_user: User = Depend
     return PlainTextResponse(content=content, headers=headers)
 
 
+# ============================================================
+# AI Prototype Quick-Tweak (Conversational Refinement)
+# ============================================================
+
+class TweakPrototypeRequest(BaseModel):
+    prompt: str
+
+
+@router.post("/{meeting_id}/tweak-prototype")
+async def tweak_prototype(
+    meeting_id: str,
+    body: TweakPrototypeRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AI Quick-Tweak: Iteratively refines the existing prototype HTML using a prompt
+    (e.g., 'Switch theme to dark mode', 'Add pricing comparison table').
+    """
+    from app.llm.router import llm_router
+
+    prompt_text = body.prompt.strip()
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail="Tweak prompt cannot be empty.")
+
+    session = session_registry.get(meeting_id)
+    current_html = session.agent_outputs.get("prototype") if session else None
+
+    if not current_html:
+        raise HTTPException(
+            status_code=400,
+            detail="No prototype has been generated for this meeting yet. Generate one first before tweaking."
+        )
+
+    system_prompt = (
+        "You are an expert Senior Frontend UX Engineer and rapid prototyping master. "
+        "You are given an existing single-file interactive HTML prototype (which includes inline CSS/Tailwind CDN and interactive JS). "
+        "The user wants to make a specific modification or addition to this prototype: "
+        f"\"{prompt_text}\". "
+        "Apply the requested change directly into the prototype HTML, carefully preserving all other existing styling, features, and interactivity. "
+        "Return ONLY the complete revised executable HTML document starting with <!DOCTYPE html> and ending with </html>. "
+        "Do NOT include markdown code blocks, backticks, or any conversational explanation before or after the code."
+    )
+
+    user_prompt = f"User Request: {prompt_text}\n\nExisting Prototype HTML:\n```html\n{current_html}\n```"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    try:
+        result = await llm_router.chat(messages, max_tokens=8192)
+        raw_output = result.text.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI refinement failed: {str(e)}")
+
+    # Clean markdown code blocks if the model wrapped it
+    cleaned_html = raw_output
+    if cleaned_html.startswith("```html"):
+        cleaned_html = cleaned_html[7:]
+    elif cleaned_html.startswith("```"):
+        cleaned_html = cleaned_html[3:]
+    if cleaned_html.endswith("```"):
+        cleaned_html = cleaned_html[:-3]
+    cleaned_html = cleaned_html.strip()
+
+    if session:
+        session.agent_outputs["prototype"] = cleaned_html
+        session.replace_agent_outputs(session.agent_outputs)
+
+        # Broadcast update to all live meeting participants
+        from app.core.connection_manager import meeting_connections
+        await meeting_connections.broadcast(session.meeting_id, {
+            "type": "prototype_tweaked",
+            "prototype": cleaned_html,
+        })
+
+    return {"prototype": cleaned_html, "status": "success"}
+
+

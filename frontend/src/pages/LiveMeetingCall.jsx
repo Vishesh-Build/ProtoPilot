@@ -3,7 +3,7 @@ import {
   ChevronLeft, ChevronRight, Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   Copy, PhoneOff, X, Check, Zap, Settings, Smile, Send, Sparkles, Loader2, AlertCircle,
   Pencil, Eye, Plus, Radio, Cpu, GitBranch, Lock, Maximize, Minimize, Volume2, Square,
-  FileDown, UserCheck, ShieldAlert,
+  FileDown, UserCheck, ShieldAlert, Trash2,
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { meetingsApi, ApiError } from "../lib/api.js";
@@ -322,6 +322,25 @@ const styles = `
   .lmc-point-btn.reject:hover, .lmc-point-btn.reject.on { background: #E14B4B; color: #fff; border-color: #E14B4B; }
   .lmc-point-btn.accept:hover, .lmc-point-btn.accept.on { background: #17A56A; color: #fff; border-color: #17A56A; }
   .lmc-point-btn.edit:hover { background: #4A55C9; color: #fff; border-color: #4A55C9; }
+  .lmc-point-btn.delete:hover { background: #DC2626; color: #fff; border-color: #DC2626; }
+
+  .lmc-priority-badge {
+    font-size: 9.5px; font-weight: 750; border-radius: 6px; padding: 2px 6px;
+    border: none; cursor: pointer; flex-shrink: 0; line-height: 1.2; transition: all 0.15s ease;
+  }
+  .lmc-priority-badge.high { background: #FEE2E2; color: #DC2626; }
+  .lmc-priority-badge.medium { background: #FEF3C7; color: #D97706; }
+  .lmc-priority-badge.low { background: #E0E7FF; color: #4338CA; }
+  .lmc-priority-badge:disabled { cursor: default; }
+
+  .lmc-priority-pill-select {
+    font-size: 10px; font-weight: 800; border-radius: 999px; padding: 3px 8px;
+    border: 1px solid transparent; cursor: pointer; flex-shrink: 0; transition: all 0.15s ease;
+  }
+  .lmc-priority-pill-select.high { background: #FEE2E2; color: #DC2626; border-color: #FECACA; }
+  .lmc-priority-pill-select.medium { background: #FEF3C7; color: #D97706; border-color: #FDE68A; }
+  .lmc-priority-pill-select.low { background: #E0E7FF; color: #4338CA; border-color: #C7D2FE; }
+
   .lmc-point-edit-input {
     flex: 1; font-size: 12px; line-height: 1.5; color: #363A48; font-family: inherit;
     background: #fff; border: 1px solid #C9CEFB; border-radius: 6px; padding: 3px 6px;
@@ -684,6 +703,7 @@ export default function LiveMeetingCall({
   const [prototypeReady, setPrototypeReady] = useState(false);
   // Host-typed "we missed one" requirement (added straight as approved).
   const [newPointText, setNewPointText] = useState("");
+  const [newPointPriority, setNewPointPriority] = useState("High");
   const [addingPoint, setAddingPoint] = useState(false);
   const [generationRunning, setGenerationRunning] = useState(false);
   const [generationPercent, setGenerationPercent] = useState(0);
@@ -1095,7 +1115,7 @@ export default function LiveMeetingCall({
         } else if (data.type === "requirements" && Array.isArray(data.new)) {
           setPoints((prev) => [
             ...prev,
-            ...data.new.map((r) => ({ id: r.id, text: r.title, status: r.status })),
+            ...data.new.map((r) => ({ id: r.id, text: r.title, status: r.status, priority: r.priority || "Medium" })),
           ]);
         } else if (data.type === "knock" && isHost && data.request) {
           setPendingKnocks((prev) => {
@@ -1146,7 +1166,7 @@ export default function LiveMeetingCall({
     meetingsApi
       .listRequirements(meetingId)
       .then((data) => {
-        setPoints((data.requirements || []).map((r) => ({ id: r.id, text: r.title, status: r.status })));
+        setPoints((data.requirements || []).map((r) => ({ id: r.id, text: r.title, status: r.status, priority: r.priority || "Medium" })));
       })
       .catch(() => {});
   }, [meetingId, connectionState]);
@@ -1436,11 +1456,11 @@ export default function LiveMeetingCall({
     if (!isHost || !title || addingPoint) return;
     setAddingPoint(true);
     try {
-      const { requirement } = await meetingsApi.addRequirement(meetingId, title);
+      const { requirement } = await meetingsApi.addRequirement(meetingId, title, newPointPriority);
       setPoints((prev) =>
         prev.some((p) => p.id === requirement.id)
           ? prev
-          : [...prev, { id: requirement.id, text: requirement.title, status: requirement.status }],
+          : [...prev, { id: requirement.id, text: requirement.title, status: requirement.status, priority: requirement.priority || newPointPriority }],
       );
       setNewPointText("");
     } catch (err) {
@@ -1449,6 +1469,33 @@ export default function LiveMeetingCall({
       console.warn("Couldn't add requirement:", err.message);
     } finally {
       setAddingPoint(false);
+    }
+  };
+
+  const cyclePriority = async (id, currentPriority) => {
+    if (!isHost) return;
+    const priorities = ["High", "Medium", "Low"];
+    const nextIdx = (priorities.indexOf(currentPriority || "Medium") + 1) % priorities.length;
+    const nextPriority = priorities[nextIdx];
+    const prevPoints = points;
+    setPoints((prev) => prev.map((p) => (p.id === id ? { ...p, priority: nextPriority } : p)));
+    try {
+      await meetingsApi.updateRequirementPriority(meetingId, id, nextPriority);
+    } catch (err) {
+      setPoints(prevPoints);
+      console.warn("Couldn't update requirement priority:", err.message);
+    }
+  };
+
+  const deletePoint = async (id) => {
+    if (!isHost) return;
+    const prevPoints = points;
+    setPoints((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await meetingsApi.deleteRequirement(meetingId, id);
+    } catch (err) {
+      setPoints(prevPoints);
+      console.warn("Couldn't delete requirement:", err.message);
     }
   };
 
@@ -1872,7 +1919,20 @@ export default function LiveMeetingCall({
                             onBlur={() => saveEditedPoint(pt.id)}
                           />
                         ) : (
-                          <span className="lmc-point-text">{pt.text}</span>
+                          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+                            <span className="lmc-point-text">{pt.text}</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <button
+                                type="button"
+                                className={`lmc-priority-badge ${(pt.priority || "Medium").toLowerCase()}`}
+                                title={isHost ? "Click to change priority: High (P0) → Medium (P1) → Low (P2)" : `Priority: ${pt.priority || "Medium"}`}
+                                disabled={!isHost}
+                                onClick={() => cyclePriority(pt.id, pt.priority)}
+                              >
+                                {pt.priority === "High" ? "P0 High" : pt.priority === "Low" ? "P2 Low" : "P1 Med"}
+                              </button>
+                            </div>
+                          </div>
                         )}
                         <div className="lmc-point-actions">
                           {editingPointId === pt.id ? (
@@ -1910,6 +1970,14 @@ export default function LiveMeetingCall({
                               >
                                 <Check size={12} strokeWidth={2.5} />
                               </button>
+                              <button
+                                className="lmc-point-btn delete"
+                                title={isHost ? "Delete requirement" : "Only the host can manage points"}
+                                disabled={!isHost}
+                                onClick={() => deletePoint(pt.id)}
+                              >
+                                <Trash2 size={11} strokeWidth={2.3} />
+                              </button>
                             </>
                           )}
                         </div>
@@ -1920,6 +1988,17 @@ export default function LiveMeetingCall({
                   <div className="lmc-points-footer">
                     {isHost && (
                       <div className="lmc-add-point-row">
+                        <button
+                          type="button"
+                          className={`lmc-priority-pill-select ${newPointPriority.toLowerCase()}`}
+                          onClick={() => {
+                            const next = newPointPriority === "High" ? "Medium" : newPointPriority === "Medium" ? "Low" : "High";
+                            setNewPointPriority(next);
+                          }}
+                          title="Priority for new requirement: click to toggle (P0 High / P1 Med / P2 Low)"
+                        >
+                          {newPointPriority === "High" ? "P0" : newPointPriority === "Low" ? "P2" : "P1"}
+                        </button>
                         <input
                           value={newPointText}
                           onChange={(e) => setNewPointText(e.target.value)}

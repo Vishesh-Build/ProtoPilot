@@ -255,10 +255,10 @@ export const meetingsApi = {
 
   listRequirements: (meetingId) => request(`/meetings/${meetingId}/requirements`),
 
-  addRequirement: (meetingId, title) =>
+  addRequirement: (meetingId, title, priority = "Medium", category = "General") =>
     request(`/meetings/${meetingId}/requirements`, {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(typeof title === "object" ? title : { title, priority, category }),
     }),
 
   updateRequirementStatus: (meetingId, requirementId, status) =>
@@ -272,6 +272,26 @@ export const meetingsApi = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
+
+  updateRequirementPriority: (meetingId, requirementId, priority) =>
+    request(`/meetings/${meetingId}/requirements/${requirementId}/priority`, {
+      method: "PATCH",
+      body: JSON.stringify({ priority }),
+    }),
+
+  deleteRequirement: (meetingId, requirementId) =>
+    request(`/meetings/${meetingId}/requirements/${requirementId}`, {
+      method: "DELETE",
+    }),
+
+  tweakPrototype: (meetingId, prompt) =>
+    request(`/meetings/${meetingId}/tweak-prototype`, {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+      timeout: 45000,
+    }),
+
+  publicPrototypeUrl: (meetingId) => `${API_BASE_URL}/p/${meetingId}`,
 
   list: () => request("/meetings"),
 

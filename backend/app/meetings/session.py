@@ -284,6 +284,32 @@ class MeetingSession:
                 return r
         return None
 
+    def update_requirement_priority(self, requirement_id: int, priority: str) -> "Requirement | None":
+        """Edit a requirement's priority (High / Medium / Low)."""
+        for r in self.requirements:
+            if r.id == requirement_id:
+                r.priority = priority
+                if self._store is not None and hasattr(self._store, "update_requirement_priority"):
+                    try:
+                        self._store.update_requirement_priority(self.meeting_id, requirement_id, priority)
+                    except Exception:
+                        pass
+                return r
+        return None
+
+    def delete_requirement(self, requirement_id: int) -> bool:
+        """Permanently delete a requirement."""
+        for i, r in enumerate(self.requirements):
+            if r.id == requirement_id:
+                self.requirements.pop(i)
+                if self._store is not None and hasattr(self._store, "delete_requirement"):
+                    try:
+                        self._store.delete_requirement(self.meeting_id, requirement_id)
+                    except Exception:
+                        pass
+                return True
+        return False
+
     def rename(self, new_name: str) -> None:
         """Rename the meeting (host-only at the API layer). Persists through
         the same store hook get_or_create already uses to backfill a name."""
