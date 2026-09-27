@@ -1,5 +1,7 @@
 import datetime
+import html
 import logging
+import secrets
 
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -11,10 +13,15 @@ from app.config import settings
 from app.core.deps import get_current_user
 from app.core.email import EmailNotConfigured, EmailSendError, send_password_reset_email, send_verification_email
 from app.core.rate_limit import (
+    forgot_password_ip_limiter,
     forgot_password_limiter,
+    get_client_ip,
+    login_ip_limiter,
     login_limiter,
     rate_limit_key,
+    register_ip_limiter,
     register_limiter,
+    resend_verification_ip_limiter,
     resend_verification_limiter,
     reset_password_limiter,
 )
@@ -48,6 +55,8 @@ _DUMMY_BCRYPT_HASH = "$2b$12$e86g5M2c8z8v3.6gWcE72.Jv57sR7jXnNq29.Oq5o3m2P7e9T9v
 
 @router.post("/register", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    register_ip_limiter.check(f"ip:{client_ip}")
     register_limiter.check(rate_limit_key(request, body.email))
 
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
@@ -64,10 +73,18 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
     token_expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)
 
     if user is not None and not user.email_verified:
-        # User closed app earlier without verifying and is re-registering.
-        # Refresh credentials & issue a fresh verification token so they aren't locked out!
-        user.name = body.name.strip()
-        user.hashed_password = hash_password(body.password)
+        # Check if previous unverified registration is expired (abandoned)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expires_at = user.verification_token_expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
+
+        # Only overwrite password if previous attempt expired (>24h) to prevent
+        # an attacker from overwriting a victim's password before they click verify.
+        if expires_at is None or expires_at < now:
+            user.name = body.name.strip()
+            user.hashed_password = hash_password(body.password)
+
         user.verification_token_hash = token_hash
         user.verification_token_expires_at = token_expires
         await db.commit()
@@ -97,6 +114,8 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
 
 @router.post("/login", response_model=UserResponse)
 async def login(body: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    login_ip_limiter.check(f"ip:{client_ip}")
     login_limiter.check(rate_limit_key(request, body.email))
 
     result = await db.execute(select(User).where(User.email == body.email.lower()))
@@ -174,6 +193,8 @@ async def me(current_user: User = Depends(get_current_user)):
 
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(body: ForgotPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    forgot_password_ip_limiter.check(f"ip:{client_ip}")
     forgot_password_limiter.check(rate_limit_key(request, body.email))
 
     result = await db.execute(select(User).where(User.email == body.email.lower()))
@@ -241,6 +262,10 @@ async def reset_password(body: ResetPasswordRequest, request: Request, db: Async
     # every device that was using the old password.
     user.refresh_token_hash = None
     user.refresh_token_expires_at = None
+    # Resetting password via email proves inbox ownership: ensure email is verified
+    user.email_verified = True
+    user.verification_token_hash = None
+    user.verification_token_expires_at = None
     await db.commit()
 
     return MessageResponse(message="Password updated — please log in with your new password.")
@@ -248,6 +273,11 @@ async def reset_password(body: ResetPasswordRequest, request: Request, db: Async
 
 @router.get("/reset-password", response_class=HTMLResponse)
 async def reset_password_page(token: str = ""):
+    # Strictly sanitize the token to prevent Reflected XSS
+    safe_token = token.strip()
+    if any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in safe_token) or len(safe_token) > 256:
+        safe_token = ""
+    clean_token = html.escape(safe_token, quote=True)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -446,7 +476,7 @@ async def reset_password_page(token: str = ""):
       <div id="alertBox" class="alert alert-error"></div>
 
       <form id="resetForm">
-        <input type="hidden" id="tokenField" value="{token}" />
+        <input type="hidden" id="tokenField" value="{clean_token}" />
         <div class="form-group">
           <label for="newPassword">New Password</label>
           <div class="input-box">
@@ -488,7 +518,7 @@ async def reset_password_page(token: str = ""):
     }}
 
     const urlParams = new URLSearchParams(window.location.search);
-    const tokenFromUrl = urlParams.get('token') || '{token}';
+    const tokenFromUrl = urlParams.get('token') || document.getElementById('tokenField').value;
     if (tokenFromUrl) {{
       document.getElementById('tokenField').value = tokenFromUrl;
     }}
@@ -556,6 +586,8 @@ async def reset_password_page(token: str = ""):
 
 @router.post("/resend-verification", response_model=MessageResponse)
 async def resend_verification(body: ResendVerificationRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    resend_verification_ip_limiter.check(f"ip:{client_ip}")
     resend_verification_limiter.check(rate_limit_key(request, body.email))
 
     result = await db.execute(select(User).where(User.email == body.email.lower()))
@@ -589,11 +621,16 @@ async def verify_email_page(token: str = "", db: AsyncSession = Depends(get_db))
     title = "Verifying..."
     desc = "Please wait while we verify your email address."
 
-    if not token:
-        title = "Missing verification link"
-        desc = "The verification token is missing. Please click the full link sent to your email inbox."
+    # Validate token characters
+    safe_token = token.strip()
+    if any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in safe_token) or len(safe_token) > 256:
+        safe_token = ""
+
+    if not safe_token:
+        title = "Missing or invalid verification link"
+        desc = "The verification token is missing or malformed. Please click the full link sent to your email inbox."
     else:
-        token_hash = hash_opaque_token(token)
+        token_hash = hash_opaque_token(safe_token)
         result = await db.execute(select(User).where(User.verification_token_hash == token_hash))
         user = result.scalar_one_or_none()
 
@@ -611,8 +648,12 @@ async def verify_email_page(token: str = "", db: AsyncSession = Depends(get_db))
             user.verification_token_expires_at = None
             await db.commit()
             success = True
+            clean_email = html.escape(user.email)
             title = "Email Verified Successfully!"
-            desc = f"Your email ({user.email}) has been verified. Your ProtoPilot account is now active and ready to use."
+            desc = f"Your email ({clean_email}) has been verified. Your ProtoPilot account is now active and ready to use."
+
+    clean_title = html.escape(title)
+    clean_desc = html.escape(desc)
 
     icon_html = (
         '<div class="icon success-icon">✓</div>'
@@ -758,8 +799,8 @@ async def verify_email_page(token: str = "", db: AsyncSession = Depends(get_db))
 
     {icon_html}
 
-    <h1>{title}</h1>
-    <p class="desc">{desc}</p>
+    <h1>{clean_title}</h1>
+    <p class="desc">{clean_desc}</p>
 
     <button class="btn" onclick="window.close()">You can close this window and open ProtoPilot</button>
   </div>

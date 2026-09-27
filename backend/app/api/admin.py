@@ -14,6 +14,7 @@ Strict Access Control:
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
@@ -53,7 +54,7 @@ async def require_admin(
         or request.query_params.get("admin_secret")
     )
     if secret_candidate and settings.admin_secret_key:
-        if secret_candidate.strip() == settings.admin_secret_key.strip():
+        if secrets.compare_digest(secret_candidate.strip(), settings.admin_secret_key.strip()):
             return {"authorized": True, "auth_type": "secret_key"}
 
     # 2. Check if the current authenticated user's email is in admin_emails
@@ -97,7 +98,7 @@ async def verify_admin_access(
     )
 
     if provided_secret and settings.admin_secret_key:
-        if provided_secret.strip() == settings.admin_secret_key.strip():
+        if secrets.compare_digest(provided_secret.strip(), settings.admin_secret_key.strip()):
             response.set_cookie(
                 key="admin_secret",
                 value=provided_secret.strip(),
