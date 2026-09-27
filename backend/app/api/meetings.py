@@ -121,3 +121,129 @@ async def get_generation_status(meeting_id: str, current_user: User = Depends(ge
         **status,
     }
 
+
+# ============================================================
+# Waiting Room / Host Admission (Knocking) System
+# ============================================================
+
+@router.post("/{meeting_id}/join-requests")
+async def request_join_meeting(meeting_id: str, current_user: User = Depends(get_current_user)):
+    """Participant knocks to enter the meeting. Host is notified in real time."""
+    session = get_session_or_404(meeting_id)
+    if session.is_user_admitted(current_user.id):
+        return {"status": "approved", "admitted": True}
+
+    req = session.request_join(current_user.id, current_user.name, current_user.email)
+    from app.core.connection_manager import meeting_connections
+    await meeting_connections.broadcast(session.meeting_id, {
+        "type": "knock",
+        "request": req,
+    })
+    return {"status": "pending", "admitted": False, "request": req}
+
+
+@router.get("/{meeting_id}/join-requests/status")
+async def check_join_status(meeting_id: str, current_user: User = Depends(get_current_user)):
+    """Participant checks if host has approved their knock."""
+    session = get_session_or_404(meeting_id)
+    admitted = session.is_user_admitted(current_user.id)
+    if admitted:
+        return {"status": "approved", "admitted": True}
+    req = session.join_requests.get(current_user.id, {})
+    return {"status": req.get("status", "pending"), "admitted": False}
+
+
+@router.get("/{meeting_id}/join-requests")
+async def list_pending_join_requests(session: MeetingSession = Depends(require_meeting_host)):
+    """Host views pending participant knocking requests."""
+    pending = [r for r in session.join_requests.values() if r.get("status") == "pending"]
+    return {"requests": pending}
+
+
+@router.post("/{meeting_id}/join-requests/{target_user_id}/approve")
+async def approve_join_request(target_user_id: str, session: MeetingSession = Depends(require_meeting_host)):
+    """Host admits participant into the meeting."""
+    session.approve_join(target_user_id)
+    from app.core.connection_manager import meeting_connections
+    await meeting_connections.broadcast(session.meeting_id, {
+        "type": "knock_approved",
+        "user_id": target_user_id,
+    })
+    return {"approved": True, "user_id": target_user_id}
+
+
+@router.post("/{meeting_id}/join-requests/{target_user_id}/reject")
+async def reject_join_request(target_user_id: str, session: MeetingSession = Depends(require_meeting_host)):
+    """Host denies participant entry into the meeting."""
+    session.reject_join(target_user_id)
+    from app.core.connection_manager import meeting_connections
+    await meeting_connections.broadcast(session.meeting_id, {
+        "type": "knock_rejected",
+        "user_id": target_user_id,
+    })
+    return {"rejected": True, "user_id": target_user_id}
+
+
+# ============================================================
+# Transcript & Meeting Notes Export
+# ============================================================
+
+from fastapi.responses import PlainTextResponse
+
+@router.get("/{meeting_id}/export-transcript", response_class=PlainTextResponse)
+async def export_meeting_transcript(meeting_id: str, current_user: User = Depends(get_current_user)):
+    """Exports full meeting transcript and extracted requirements as a clean Markdown document."""
+    session = get_session_or_404(meeting_id)
+
+    lines = [
+        f"# Meeting Transcript: {session.name}",
+        f"**Meeting ID:** `{session.meeting_id}`",
+        f"**Date:** {session.created_at}",
+        f"**Status:** {session.status.upper()}",
+        "",
+        "---",
+        "",
+        "## 📝 Discussion Transcript",
+        "",
+    ]
+
+    if not session.transcript:
+        lines.append("*No speech recorded in this session.*")
+    else:
+        for item in session.transcript:
+            speaker = item.speaker or "Speaker"
+            time_str = item.spoken_at[:19].replace("T", " ") if item.spoken_at else ""
+            lang = f" ({item.language})" if item.language else ""
+            lines.append(f"**[{time_str}] {speaker}{lang}:**")
+            lines.append(f"> {item.display_text()}")
+            if item.english_text and item.original_text != item.english_text:
+                lines.append(f"> *Original:* {item.original_text}")
+            lines.append("")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        "## 💡 Extracted Requirements",
+        "",
+    ])
+
+    if not session.requirements:
+        lines.append("*No requirement points were extracted or approved.*")
+    else:
+        for req in session.requirements:
+            status_emoji = "✅" if req.status == "approved" else "❌" if req.status == "rejected" else "⏳"
+            lines.append(f"- {status_emoji} **[{req.category}]** {req.title} *(Priority: {req.priority}, Confidence: {req.confidence}%)*")
+
+    lines.extend([
+        "",
+        "---",
+        "*Generated by ProtoPilot AI Collaboration Engine*",
+    ])
+
+    content = "\n".join(lines)
+    clean_filename = "".join(c for c in session.name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+    headers = {"Content-Disposition": f'attachment; filename="ProtoPilot_{clean_filename or "Meeting"}_Transcript.md"'}
+    return PlainTextResponse(content=content, headers=headers)
+
+

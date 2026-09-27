@@ -82,6 +82,11 @@ class MeetingSession:
     # Filled in after the agent pipeline runs — agent_id -> its output text.
     agent_outputs: dict = field(default_factory=dict)
 
+    # Waiting Room / Host Approval
+    approved_user_ids: set[str] = field(default_factory=set)
+    # user_id -> {"user_id": ..., "name": ..., "email": ..., "status": "pending" | "approved" | "rejected", "requested_at": ...}
+    join_requests: dict = field(default_factory=dict)
+
     _id_counter: "itertools.count" = field(default_factory=lambda: itertools.count(1))
     _line_counter: "itertools.count" = field(default_factory=lambda: itertools.count(1))
 
@@ -90,6 +95,42 @@ class MeetingSession:
     # the path the existing unit tests take), in which case every mutator
     # below behaves exactly as it did before persistence existed.
     _store: object | None = field(default=None, repr=False, compare=False)
+
+    def is_user_admitted(self, user_id: str) -> bool:
+        """Returns True if the user is the meeting host or has been approved by the host."""
+        if not self.host_user_id or user_id == self.host_user_id:
+            return True
+        return user_id in self.approved_user_ids
+
+    def request_join(self, user_id: str, name: str, email: str) -> dict:
+        """Participant requests permission from the host to enter the meeting."""
+        if self.is_user_admitted(user_id):
+            status = "approved"
+        else:
+            status = "pending"
+        req = {
+            "user_id": user_id,
+            "name": name,
+            "email": email,
+            "status": status,
+            "requested_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+        self.join_requests[user_id] = req
+        return req
+
+    def approve_join(self, user_id: str) -> bool:
+        """Host approves participant to join the meeting."""
+        if user_id in self.join_requests:
+            self.join_requests[user_id]["status"] = "approved"
+        self.approved_user_ids.add(user_id)
+        return True
+
+    def reject_join(self, user_id: str) -> bool:
+        """Host rejects participant from joining the meeting."""
+        if user_id in self.join_requests:
+            self.join_requests[user_id]["status"] = "rejected"
+        self.approved_user_ids.discard(user_id)
+        return True
 
     def _persist_line(self, line: TranscriptLine) -> None:
         if self._store is not None:

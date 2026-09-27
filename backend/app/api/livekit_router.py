@@ -39,7 +39,13 @@ async def get_livekit_token(meeting_id: str, current_user: User = Depends(get_cu
     it can't be replayed for a different meeting or spoofed as someone else.
     """
     _require_configured()
-    get_session_or_404(meeting_id)  # 404s if the host hasn't created this meeting yet
+    session = get_session_or_404(meeting_id)  # 404s if the host hasn't created this meeting yet
+
+    if not session.is_user_admitted(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Waiting for host approval before joining this meeting.",
+        )
 
     from livekit import api as lk_api
 
