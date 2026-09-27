@@ -14,6 +14,10 @@ async def get_or_create_oauth_user(db: AsyncSession, provider: str, profile: OAu
     result = await db.execute(select(User).where(provider_column == profile.provider_user_id))
     user = result.scalar_one_or_none()
     if user is not None:
+        if not user.email_verified:
+            user.email_verified = True
+            await db.commit()
+            await db.refresh(user)
         return user
 
     # 2. No link yet, but an account with this email already exists (e.g.

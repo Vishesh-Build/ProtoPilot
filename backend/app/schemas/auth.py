@@ -88,6 +88,7 @@ class UserResponse(BaseModel):
     name: str
     email: EmailStr
     email_verified: bool = True
+    token: str | None = None
 
     model_config = {"from_attributes": True}
 

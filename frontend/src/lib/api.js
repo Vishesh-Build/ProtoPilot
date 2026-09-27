@@ -53,6 +53,12 @@ async function refreshSession() {
         });
         clearTimeout(tid);
         if (!res.ok) return false;
+        try {
+          const data = await res.json();
+          if (data && data.token) {
+            setStoredToken(data.token);
+          }
+        } catch {}
         return true;
       } catch {
         return false;
@@ -139,11 +145,16 @@ async function request(path, options = {}) {
       const replayController = new AbortController();
       const replayTimeoutId = setTimeout(() => replayController.abort(), timeoutMs);
       const replaySignal = options.signal || replayController.signal;
+      const latestToken = getStoredToken();
+      const replayHeaders = { ...headers };
+      if (latestToken) {
+        replayHeaders["Authorization"] = `Bearer ${latestToken}`;
+      }
       try {
         const { timeout, headers: _h, ...fetchOptions } = options;
         res = await fetch(`${API_BASE_URL}${path}`, {
           credentials: "include",
-          headers,
+          headers: replayHeaders,
           signal: replaySignal,
           ...fetchOptions,
         });
@@ -185,11 +196,16 @@ export const authApi = {
       body: JSON.stringify({ name, email, password }),
     }),
 
-  login: (email, password) =>
-    request("/auth/login", {
+  login: async (email, password) => {
+    const user = await request("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
-    }),
+    });
+    if (user && user.token) {
+      setStoredToken(user.token);
+    }
+    return user;
+  },
 
   logout: () => {
     setStoredToken(null);

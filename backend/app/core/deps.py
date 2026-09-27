@@ -19,24 +19,47 @@ async def get_current_user(
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    token = access_token
-    if not token and authorization:
+    # 1. Collect candidate tokens (prefer Authorization header if present, fallback to cookie)
+    candidates = []
+    if authorization:
         parts = authorization.strip().split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
+            candidates.append(parts[1])
         elif len(parts) == 1:
-            token = parts[0]
+            candidates.append(parts[0])
+    if access_token:
+        candidates.append(access_token)
 
-    if not token:
+    if not candidates:
         raise _CREDENTIALS_ERROR
 
-    try:
-        user_id = decode_access_token(token)
-    except jwt.PyJWTError:
+    user_id = None
+    for cand in candidates:
+        try:
+            user_id = decode_access_token(cand)
+            if user_id:
+                break
+        except jwt.PyJWTError:
+            continue
+
+    if not user_id:
         raise _CREDENTIALS_ERROR
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    if user is None or not user.is_active or not user.email_verified:
+    if user is None or not user.is_active:
         raise _CREDENTIALS_ERROR
+
+    if not user.email_verified:
+        # OAuth users are pre-verified by their identity provider (Google / GitHub)
+        if user.google_id or user.github_id:
+            user.email_verified = True
+            await db.commit()
+            await db.refresh(user)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Please verify your email address before logging in.",
+            )
+
     return user

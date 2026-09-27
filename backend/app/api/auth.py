@@ -141,7 +141,8 @@ async def login(body: LoginRequest, request: Request, response: Response, db: As
             detail="Please verify your email address before logging in. We've sent a verification link to your email.",
         )
 
-    await issue_session(user, db, response)
+    access_token = await issue_session(user, db, response)
+    user.token = access_token
     return user
 
 
@@ -169,7 +170,8 @@ async def refresh(
     if user is None or expires_at is None or expires_at < now:
         raise unauthorized
 
-    await issue_session(user, db, response)  # rotates the refresh token too
+    access_token = await issue_session(user, db, response)  # rotates the refresh token too
+    user.token = access_token
     return user
 
 
