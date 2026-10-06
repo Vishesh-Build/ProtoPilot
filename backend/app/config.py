@@ -99,14 +99,14 @@ class Settings(BaseSettings):
     # outside. This is a ceiling and not a spend, so the headroom is free.
     llm_default_max_tokens: int = 2048
     llm_default_temperature: float = 0.3
-    llm_request_timeout_seconds: float = 90.0
+    llm_request_timeout_seconds: float = 120.0
     provider_cooldown_seconds: float = 10.0
     llm_mock_mode: bool = False
 
     # How long the router may honor a provider's Retry-After during the
-    # GENERATION pipeline, in seconds. Set to 30.0s so honest rate-limit pauses
-    # (e.g. Groq 12s) are safely waited out rather than crashing the pipeline.
-    llm_generation_max_rate_limit_wait: float = 30.0
+    # GENERATION pipeline, in seconds. Set to 60.0s so honest rate-limit pauses
+    # (e.g. Groq 30s) are safely waited out rather than crashing the pipeline.
+    llm_generation_max_rate_limit_wait: float = 60.0
 
     # Strict 1 concurrency so free tier API keys (NIM, Groq) never receive
     # simultaneous requests which cause 429s or server-side read timeouts.
