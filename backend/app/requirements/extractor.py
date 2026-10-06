@@ -51,20 +51,23 @@ def _is_pure_filler(text: str) -> bool:
 SYSTEM_PROMPT = """You extract software requirements from a client meeting transcript.
 
 You will be given:
-1. A list of requirement titles already captured (do NOT repeat these or anything that means the same thing).
+1. A list of requirement titles already captured.
 2. New lines of transcript since the last check.
 
-Return ONLY a JSON array (no markdown fences, no commentary) of NEW, DISTINCT
+Return ONLY a JSON array (no markdown fences, no commentary) of NEW, ACTIONABLE
 requirements implied by the new lines. If there are none, return an empty array: []
 
 Each item must have exactly these keys:
-  "title": short, specific, actionable (e.g. "OTP-based mobile login")
-  "category": one or two words (e.g. "Authentication", "Payments", "Admin")
+  "title": short, specific, actionable in English (e.g. "Online Booking System UI", "OTP-based mobile login")
+  "category": one or two words (e.g. "UI/UX", "Authentication", "Core", "Payments")
   "priority": "High", "Medium", or "Low"
-  "confidence": integer 0-100, how confident you are this is a real, distinct requirement
+  "confidence": integer 0-100, how confident you are this is a real feature or user requirement
 
-Do not invent requirements that aren't reasonably implied by the text. Casual
-remarks, greetings, and clarifying questions are not requirements."""
+CRITICAL EXTRACTION GUIDELINES:
+1. The transcript may contain speech in English, Hindi, Gujarati, or code-mixed Indian phrases (e.g. 'ek online booking system banao', 'login chahiye', 'dashboard dikhana hai', 'મને ઓનલાઇન બુકિંગ સિસ્ટમ જોઈએ'). ALWAYS extract these feature requests and desires as active software requirements!
+2. Do not be overly strict. If a user states a feature or UI element they want to build, see, or have in the prototype, CAPTURE IT.
+3. If the user mentions a specific UI layer, interactive workflow, or sub-component (e.g. 'Booking Portal UI' when only 'Booking System' exists), capture it as a distinct UI/UX requirement.
+4. Only truly pure conversational filler like greetings ('hi', 'bye', 'hello') or standalone acknowledgements ('ok', 'hmm') should return []."""
 
 
 def _build_user_prompt(existing_titles: list[str], new_lines: list[TranscriptLine]) -> str:
@@ -108,6 +111,13 @@ def _parse_json_array(raw: str) -> list[dict]:
         if start == -1 or end <= start:
             raise
         parsed = json.loads(cleaned[start:end + 1])
+
+    if isinstance(parsed, dict):
+        if "title" in parsed:
+            return [parsed]
+        if "requirements" in parsed and isinstance(parsed["requirements"], list):
+            return parsed["requirements"]
+        raise ValueError("expected a JSON array or requirement object")
 
     if not isinstance(parsed, list):
         raise ValueError("expected a JSON array")
