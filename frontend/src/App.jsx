@@ -50,7 +50,8 @@ function generateMeetingId() {
 
 export default function App() {
   const params = getSearchParams();
-  const oauthToken = params.get("oauth_token");
+  const rawOAuthToken = params.get("oauth_token") || params.get("token") || params.get("access_token");
+  const oauthToken = rawOAuthToken ? rawOAuthToken.trim().replace(/^["']|["']$/g, "") : null;
   const cameFromOAuth = params.get("oauth") === "success" || Boolean(oauthToken);
   if (oauthToken) {
     setStoredToken(oauthToken);
@@ -90,6 +91,31 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentUser]);
+
+  // Global OAuth token handler from deep-links or external browser redirect
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.protopilotDesktop &&
+      typeof window.protopilotDesktop.onOAuthTokenReceived === "function"
+    ) {
+      const unsub = window.protopilotDesktop.onOAuthTokenReceived(async ({ token }) => {
+        if (token) {
+          const clean = token.trim().replace(/^["']|["']$/g, "");
+          setStoredToken(clean);
+          try {
+            const user = await authApi.me(clean);
+            setCurrentUser(user);
+            setPage("dashboard");
+          } catch (e) {
+            console.error("[App] Failed to load user profile with OAuth token:", e);
+          }
+        }
+      });
+      return unsub;
+    }
+  }, []);
+
 
   // True while a live call should stay connected in the background. The app
   // renders one page at a time, so without this, navigating from the meeting

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Mail, Lock, Eye, EyeOff, ArrowRight, Radio, ShieldCheck,
   Github, AlertCircle, Check, Sparkles, Lock as LockIcon,
@@ -231,9 +231,10 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
     ) {
       const unsub = window.protopilotDesktop.onOAuthTokenReceived(async ({ token }) => {
         if (token) {
-          setStoredToken(token);
+          const cleanToken = token.trim().replace(/^["']|["']$/g, "");
+          setStoredToken(cleanToken);
           try {
-            const user = await authApi.me();
+            const user = await authApi.me(cleanToken);
             onLogin?.(user);
           } catch (err) {
             setError(err.message || "Failed to fetch user profile after sign-in");
@@ -259,8 +260,9 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
       try {
         const result = await window.protopilotDesktop.openOAuthPopup(provider);
         if (result && result.success && result.token) {
-          setStoredToken(result.token);
-          const user = await authApi.me();
+          const cleanToken = result.token.trim().replace(/^["']|["']$/g, "");
+          setStoredToken(cleanToken);
+          const user = await authApi.me(cleanToken);
           onLogin?.(user);
           return;
         } else if (result && result.error && result.error !== "Authentication window was closed") {

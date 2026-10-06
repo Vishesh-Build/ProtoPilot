@@ -212,7 +212,15 @@ export const authApi = {
     return request("/auth/logout", { method: "POST" });
   },
 
-  me: (options = {}) => request("/auth/me", { timeout: 3000, ...options }),
+  me: (arg = {}) => {
+    let opts = { timeout: 10000 };
+    if (typeof arg === "string" && arg.trim()) {
+      opts.headers = { Authorization: `Bearer ${arg.trim()}` };
+    } else if (typeof arg === "object" && arg) {
+      opts = { ...opts, ...arg };
+    }
+    return request("/auth/me", opts);
+  },
 
   forgotPassword: (email) =>
     request("/auth/forgot-password", {

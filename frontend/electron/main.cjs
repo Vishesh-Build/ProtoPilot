@@ -40,8 +40,9 @@ function handleProtocolUrl(urlStr) {
   try {
     const u = new URL(urlStr);
     if (u.protocol === "protopilot:") {
-      const token = u.searchParams.get("oauth_token") || u.searchParams.get("token");
+      let token = u.searchParams.get("oauth_token") || u.searchParams.get("token") || u.searchParams.get("access_token");
       if (token) {
+        token = token.trim().replace(/^["']|["']$/g, "");
         if (activeOAuthResolver) {
           activeOAuthResolver({ success: true, token });
           activeOAuthResolver = null;
@@ -420,8 +421,9 @@ function startProductionServer(distDir) {
       try {
         const parsedUrl = new URL(req.url, `http://localhost:${appPort}`);
         if (parsedUrl.searchParams.get("oauth") === "success") {
-          const token = parsedUrl.searchParams.get("oauth_token");
+          let token = parsedUrl.searchParams.get("oauth_token") || parsedUrl.searchParams.get("token") || parsedUrl.searchParams.get("access_token");
           if (token) {
+            token = token.trim().replace(/^["']|["']$/g, "");
             if (activeOAuthResolver) {
               activeOAuthResolver({ success: true, token });
               activeOAuthResolver = null;
