@@ -57,17 +57,20 @@ def _build_context(agent_id: str, states: dict[str, AgentState], requirements_bl
         # Only the PM agent has no dependencies — it works from requirements directly.
         return f"Approved requirements:\n{requirements_block}"
 
+    if agent_id == "prototype":
+        # The prototype agent requires the approved requirements and the Interface Designer's screens.
+        # Developer artifacts (database tables, raw API endpoints) are excluded to ensure zero technical jargon in the client UI.
+        ui_output = (states.get("ui") and states["ui"].output) or "(no UI specification)"
+        return (
+            f"Approved Client Requirements:\n{requirements_block}\n\n"
+            f"--- User Interface Specification from Interface Designer ---\n{ui_output}"
+        )
+
     parts = []
     for dep_id in definition.depends_on:
         dep_state = states[dep_id]
         dep_name = AGENT_DEFINITIONS[dep_id].name
         output = dep_state.output or "(no output)"
-        if agent_id == "prototype":
-            # Keep prompt compact so total tokens (prompt + max_tokens) stay safely below 5,500 tokens
-            # (comfortably beneath Groq's 8,000 TPM limit). The prototype needs UI screens first and foremost.
-            max_chars = 3500 if dep_id == "ui" else 2000
-            if len(output) > max_chars:
-                output = output[:max_chars] + "\n...(truncated for prototype build)"
         parts.append(f"--- Output from {dep_name} ---\n{output}")
 
     return "\n\n".join(parts)
@@ -226,7 +229,7 @@ async def _run_prototype_agent(
     stitch_html = await stitch_service.generate_prototype_html(context)
     if stitch_html:
         await emit({"type": "agent_log", "agent": agent_id, "message": "Generated via Google Stitch."})
-        return stitch_html
+        return stitch_service.sanitize_prototype_html(stitch_html)
 
     await emit({"type": "agent_log", "agent": agent_id, "message": "Stitch unavailable — falling back to LLM-generated HTML."})
     async with llm_gate:
@@ -246,4 +249,4 @@ async def _run_prototype_agent(
         html = html.replace("</body>", stitch_service._CLICK_SAFETY_NET_SCRIPT + "</body>", 1)
     else:
         html += stitch_service._CLICK_SAFETY_NET_SCRIPT
-    return html
+    return stitch_service.sanitize_prototype_html(html)

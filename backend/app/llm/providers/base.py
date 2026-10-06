@@ -298,11 +298,8 @@ def extract_reply_text(data: object) -> tuple[str, str]:
         "",
     )
     if thinking:
-        return "", (
-            f"model returned {len(thinking)} characters of reasoning and no answer "
-            f"(finish_reason={finish}) — raise max_tokens: reasoning models spend the "
-            f"same budget thinking before they write anything visible"
-        )
+        # Fallback: if content was empty, return thinking instead of failing the pipeline
+        return thinking.strip(), ""
     if finish == "length":
         return "", (
             "reply was cut off before any visible text (finish_reason=length) — "

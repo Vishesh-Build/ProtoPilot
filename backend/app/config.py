@@ -37,8 +37,7 @@ class Settings(BaseSettings):
     # them in front, every process start paid a 410 first.
     nim_models: str = (
         "openai/gpt-oss-20b,"
-        "meta/llama-3.3-70b-instruct,"
-        "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+        "meta/llama-3.2-11b-vision-instruct"
     )
 
     openrouter_api_key: str | None = None
@@ -61,10 +60,9 @@ class Settings(BaseSettings):
     # as the fast, higher-throughput fallback — a 429 on 120b is transient, so
     # the router simply moves on, and NIM serves gpt-oss-20b as well.
     groq_models: str = (
-        "openai/gpt-oss-120b,"
+        "qwen/qwen3.8-27b,"
         "openai/gpt-oss-20b,"
-        "llama-3.3-70b-versatile,"
-        "llama-3.1-8b-instant"
+        "openai/gpt-oss-120b"
     )
 
     # ---- Google Gemini (optional, but the best free budget available) ----
@@ -87,17 +85,8 @@ class Settings(BaseSettings):
     # auth, /chat/completions and /models all work unchanged.
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
-    # gemini-3.6-flash leads: it is Google's own recommended-stable flash
-    # (the successor it names when the retired gemini-2.5-flash 404s) and,
-    # being less bleeding-edge than 3.8, it is the one that reliably answers
-    # 200 rather than 503 "high demand" — checked live 2026-09-04. The newer
-    # gemini-3.8-flash and the gemini-flash-latest alias sit behind it. NOTE
-    # the router only tries a *different* Gemini model on a 404/410 (model
-    # retired) via GET /models rediscovery — a 503 on the lead fails the whole
-    # Gemini provider through to Groq — so the lead must be a reliably-live id,
-    # not merely the newest.
+    # gemini-3.8-flash leads, followed by gemini-flash-latest.
     gemini_models: str = (
-        "gemini-3.6-flash,"
         "gemini-3.8-flash,"
         "gemini-flash-latest"
     )
@@ -111,39 +100,23 @@ class Settings(BaseSettings):
     llm_default_max_tokens: int = 2048
     llm_default_temperature: float = 0.3
     llm_request_timeout_seconds: float = 60.0
-    provider_cooldown_seconds: float = 60.0
+    provider_cooldown_seconds: float = 10.0
     llm_mock_mode: bool = False
 
     # How long the router may honor a provider's Retry-After during the
-    # GENERATION pipeline, in seconds. The meeting/caption path uses a short
-    # ceiling (LLMRouter._RATE_LIMIT_MAX_WAIT, ~20s) because a caption that
-    # lands half a minute late is useless — but a generation run is expected
-    # to take a minute or two, so there it is fine, and far better, to pay a
-    # provider's honest "wait 24s" than to fail the agent and cascade five
-    # more. The live demo's Groq 429s asked for ~24s and the 20s ceiling
-    # abandoned them; this is why generation gets its own, larger ceiling.
-    # (With a Gemini key set this rarely matters — Gemini's budget means the
-    # pipeline seldom hits a 429 at all — but it makes generation reliable
-    # even on Groq+NIM alone.)
-    llm_generation_max_rate_limit_wait: float = 45.0
+    # GENERATION pipeline, in seconds. With fast failover to NIM (0.8s), we
+    # set this low (3.0s) so rate-limited providers fail over immediately
+    # rather than stalling generation for 30+ seconds.
+    llm_generation_max_rate_limit_wait: float = 3.0
 
-    # How many generation-agent LLM calls may be in flight at once. The 9-agent
-    # DAG has a wave that fires concurrent calls (ui + backend share one), and
-    # on a free tier two provider calls landing in the same instant split that
-    # tier's per-minute token budget between them — one wins and the other gets
-    # a 429 or an overload timeout. That is exactly what failed the backend
-    # agent (and everything downstream of it) in the live run, twice, while its
-    # wave-mate ui succeeded. Serialising to 1 gives each agent the whole budget
-    # in turn; the widest wave is two agents, so the cost is one agent's latency,
-    # not real parallelism. Raise this only on a paid tier with headroom for
-    # concurrent calls.
+    # Strict 1 concurrency so free tier API keys (NIM, Groq) never receive
+    # simultaneous requests which cause 429s or server-side read timeouts.
     llm_generation_concurrency: int = 1
 
     # ---- Stitch (AI UI design tool) ----
-    # Get a key from https://stitch.withgoogle.com -> profile -> Stitch
-    # settings -> API key. Leave unset to keep the original LLM-generated
-    # HTML prototype behavior (app/services/stitch_service.py falls back
-    # automatically when this is None).
+    # Disabled by default so generation finishes in <30 seconds via fast LLM.
+    # Set STITCH_ENABLED=true in backend/.env only if you want Google Stitch MCP.
+    stitch_enabled: bool = False
     stitch_api_key: str | None = None
     # Optional: pin generation to one existing Stitch project id instead of
     # auto-creating/caching one on first use.

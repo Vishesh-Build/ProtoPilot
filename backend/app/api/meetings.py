@@ -286,6 +286,7 @@ async def tweak_prototype(
         "The user wants to make a specific modification or addition to this prototype: "
         f"\"{prompt_text}\". "
         "Apply the requested change directly into the prototype HTML, carefully preserving all other existing styling, features, and interactivity. "
+        "STRICT CLIENT PRESENTATION RULE: This is an end-user client prototype. NEVER add database schema names, SQL tables, REST API paths (like POST /...), or developer debug toasts. All user feedback must be clean, natural product UI messages. "
         "Return ONLY the complete revised executable HTML document starting with <!DOCTYPE html> and ending with </html>. "
         "Do NOT include markdown code blocks, backticks, or any conversational explanation before or after the code."
     )
@@ -311,6 +312,9 @@ async def tweak_prototype(
     if cleaned_html.endswith("```"):
         cleaned_html = cleaned_html[:-3]
     cleaned_html = cleaned_html.strip()
+
+    from app.services.stitch_service import sanitize_prototype_html
+    cleaned_html = sanitize_prototype_html(cleaned_html)
 
     if session:
         session.agent_outputs["prototype"] = cleaned_html

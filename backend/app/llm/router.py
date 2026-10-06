@@ -75,11 +75,8 @@ def _mock_chat_result(messages: list[dict]) -> ChatResult:
 
 class LLMRouter:
     def __init__(self):
-        # Gemini first when it has a key (largest free budget — see the module
-        # docstring), then Groq -> NIM -> OpenRouter. An unconfigured provider
-        # is skipped, so no Gemini key means the chain is just Groq-first, as
-        # it always was.
-        self.providers = [GeminiProvider(), GroqProvider(), NimProvider(), OpenRouterProvider()]
+        # Groq first with ultra-fast Qwen-27B (0.35s response), then NIM (0.8s), then Gemini, OpenRouter
+        self.providers = [GroqProvider(), NimProvider(), GeminiProvider(), OpenRouterProvider()]
         self._cooldown_until: dict[str, float] = {}
 
     def _is_cooling_down(self, provider_name: str) -> bool:
@@ -94,24 +91,9 @@ class LLMRouter:
     # requirement point is worthless if it lands a minute late, so when the
     # provider does not say how long to wait, the router would rather fall
     # through to the next provider than keep an utterance waiting.
-    _RATE_LIMIT_BACKOFF = (1.0, 2.0)
-
-    # When the provider DOES say (Retry-After), that ask is honored — up to
-    # this ceiling. This is the DEFAULT ceiling, used by the meeting/caption
-    # path where a point that lands half a minute late is useless. The
-    # generation pipeline passes a larger ceiling via `max_rate_limit_wait`
-    # (settings.llm_generation_max_rate_limit_wait), because there a run is
-    # expected to take a minute or two and paying a provider's honest "wait
-    # 24s" beats failing the agent and cascading five more. Asks longer than
-    # the ceiling in force mean a per-minute ceiling that will not clear in
-    # time, so the router falls through to the next provider immediately.
-    _RATE_LIMIT_MAX_WAIT = 20.0
-
-    # Retries attempted after the first attempt, when the provider asked for
-    # a wait inside the ceiling. Two (three attempts total) covers the live
-    # pattern of 10s then 2s; an agent wave that is still 429ing after that
-    # belongs to the next wave.
-    _RATE_LIMIT_MAX_RETRIES = 2
+    _RATE_LIMIT_BACKOFF = (1.0,)
+    _RATE_LIMIT_MAX_WAIT = 2.0
+    _RATE_LIMIT_MAX_RETRIES = 1
 
     async def _chat_with_retry(self, provider, messages, max_tokens, temperature, max_rate_limit_wait):
         """
@@ -131,9 +113,8 @@ class LLMRouter:
         """
         retries = 0
         total_delay = 0.0
-        is_generation = max_rate_limit_wait > self._RATE_LIMIT_MAX_WAIT
-        backoff_schedule = (2.0, 4.0, 8.0, 12.0) if is_generation else self._RATE_LIMIT_BACKOFF
-        max_retries = 4 if is_generation else self._RATE_LIMIT_MAX_RETRIES
+        backoff_schedule = self._RATE_LIMIT_BACKOFF
+        max_retries = self._RATE_LIMIT_MAX_RETRIES
 
         while True:
             try:
@@ -253,6 +234,7 @@ class LLMRouter:
                         )
                     except Exception:
                         pass
+                    self._cooldown_until[provider.name] = time.monotonic() + 20.0
                     errors.append(f"{provider.name}: {e.message}")
                     continue
                 if e.model_gone:

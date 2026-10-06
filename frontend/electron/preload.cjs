@@ -51,6 +51,12 @@ contextBridge.exposeInMainWorld("protopilotDesktop", {
   setApiBaseUrl: (url) => ipcRenderer.invoke("protopilot:set-api-base-url", url),
   // --- Open Prototype HTML in default system browser safely ---
   openPrototypeInBrowser: (html) => ipcRenderer.invoke("protopilot:open-html-in-browser", html),
-  // --- Native OAuth Window ---
+  // --- Native OAuth Window & Callback Listener ---
   openOAuthPopup: (provider) => ipcRenderer.invoke("protopilot:open-oauth-popup", provider),
+  onOAuthTokenReceived: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("protopilot:oauth-token-received", listener);
+    return () => ipcRenderer.removeListener("protopilot:oauth-token-received", listener);
+  },
 });
+

@@ -15,13 +15,13 @@ import sys
 import time
 from pathlib import Path
 
-# Make `app` importable and read the real .env, whether this is launched as
-# `python scripts/prove_pipeline.py` or `python -m scripts.prove_pipeline`
-# from anywhere — same bootstrap preflight.py uses.
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(_BACKEND_DIR)
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 
 from app.agents.orchestrator import run_pipeline
 from app.agents.state import AgentStatus

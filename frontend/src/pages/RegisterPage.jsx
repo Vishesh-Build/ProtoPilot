@@ -3,7 +3,7 @@ import {
   Mail, Lock, Eye, EyeOff, ArrowRight, Radio, ShieldCheck,
   Github, Check, Sparkles, Lock as LockIcon, User, X, AlertCircle, MailCheck,
 } from "lucide-react";
-import { authApi, API_BASE_URL } from "../lib/api.js";
+import { authApi, API_BASE_URL, setStoredToken } from "../lib/api.js";
 
 /* ============================================================
    ProtoPilot — Register (desktop split layout)
@@ -247,11 +247,65 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [oauthLoading, setOauthLoading] = useState(null);
 
   const [sent, setSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [resending, setResending] = useState(false);
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.protopilotDesktop &&
+      typeof window.protopilotDesktop.onOAuthTokenReceived === "function"
+    ) {
+      const unsub = window.protopilotDesktop.onOAuthTokenReceived(async ({ token }) => {
+        if (token) {
+          setStoredToken(token);
+          try {
+            const user = await authApi.me();
+            onRegister?.(user);
+          } catch (err) {
+            setError(err.message || "Failed to fetch user profile after sign-in");
+          } finally {
+            setOauthLoading(null);
+          }
+        }
+      });
+      return unsub;
+    }
+  }, [onRegister]);
+
+  const handleOAuthLogin = async (provider) => {
+    setError("");
+    setNotice("");
+    setOauthLoading(provider);
+
+    if (
+      typeof window !== "undefined" &&
+      window.protopilotDesktop &&
+      typeof window.protopilotDesktop.openOAuthPopup === "function"
+    ) {
+      try {
+        const result = await window.protopilotDesktop.openOAuthPopup(provider);
+        if (result && result.success && result.token) {
+          setStoredToken(result.token);
+          const user = await authApi.me();
+          onRegister?.(user);
+          return;
+        } else if (result && result.error && result.error !== "Authentication window was closed") {
+          setError(result.error);
+        }
+      } catch (err) {
+        setError(err.message || `Failed to sign in with ${provider}`);
+      } finally {
+        setOauthLoading(null);
+      }
+    } else {
+      window.location.href = `${API_BASE_URL}/auth/${provider}/login`;
+    }
+  };
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -529,16 +583,18 @@ export default function RegisterPage({ onRegister, onGoLogin }) {
                 <button
                   type="button"
                   className="auth-oauth-btn"
-                  onClick={() => { window.location.href = `${API_BASE_URL}/auth/google/login`; }}
+                  disabled={Boolean(oauthLoading) || submitting}
+                  onClick={() => handleOAuthLogin("google")}
                 >
-                  <GoogleMark /> Google
+                  <GoogleMark /> {oauthLoading === "google" ? "Connecting…" : "Google"}
                 </button>
                 <button
                   type="button"
                   className="auth-oauth-btn"
-                  onClick={() => { window.location.href = `${API_BASE_URL}/auth/github/login`; }}
+                  disabled={Boolean(oauthLoading) || submitting}
+                  onClick={() => handleOAuthLogin("github")}
                 >
-                  <Github size={15} /> GitHub
+                  <Github size={15} /> {oauthLoading === "github" ? "Connecting…" : "GitHub"}
                 </button>
               </div>
 

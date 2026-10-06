@@ -57,6 +57,11 @@ export default function App() {
     try {
       window.history.replaceState({}, document.title, window.location.pathname);
     } catch {}
+    if (typeof window !== "undefined" && !window.protopilotDesktop) {
+      try {
+        window.location.href = `protopilot://auth-callback?oauth=success&oauth_token=${encodeURIComponent(oauthToken)}`;
+      } catch (e) {}
+    }
   }
   const tokenParam = params.get("token");
   // Only treat tokenParam as password reset token if not coming from OAuth

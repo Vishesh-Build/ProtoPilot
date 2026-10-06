@@ -1,7 +1,7 @@
 {
   "name": "protopilot-frontend",
   "private": true,
-  "version": "0.3.12",
+  "version": "0.3.13",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -32,6 +32,10 @@
   "build": {
     "appId": "com.protopilot.desktop",
     "productName": "ProtoPilot",
+    "protocols": {
+      "name": "ProtoPilot",
+      "schemes": ["protopilot"]
+    },
     "directories": { "output": "release" },
     "files": ["dist/**/*", "electron/**/*", "package.json"],
     "publish": [

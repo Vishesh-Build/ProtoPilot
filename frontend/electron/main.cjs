@@ -33,19 +33,69 @@ const fs = require("fs");
 
 let mainWindow = null;
 
+let activeOAuthResolver = null;
+
+function handleProtocolUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== "string") return;
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol === "protopilot:") {
+      const token = u.searchParams.get("oauth_token") || u.searchParams.get("token");
+      if (token) {
+        if (activeOAuthResolver) {
+          activeOAuthResolver({ success: true, token });
+          activeOAuthResolver = null;
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("protopilot:oauth-token-received", { token });
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      } else if (u.searchParams.get("error")) {
+        const error = u.searchParams.get("error") || "Authentication failed";
+        if (activeOAuthResolver) {
+          activeOAuthResolver({ success: false, error });
+          activeOAuthResolver = null;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[main] Failed to parse deep-link url:", err);
+  }
+}
+
+// Register custom protocol for deep linking
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient("protopilot", process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient("protopilot");
+}
+
 // Enforce single-instance lock: prevents multiple instances fighting over port 5173
 // and showing a blank white screen.
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, commandLine) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+    const deepLink = (commandLine || []).find((arg) => typeof arg === "string" && arg.startsWith("protopilot://"));
+    if (deepLink) {
+      handleProtocolUrl(deepLink);
+    }
   });
 }
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleProtocolUrl(url);
+});
 
 ipcMain.handle("protopilot:write-clipboard", (_event, text) => {
   if (typeof text === "string") {
@@ -167,7 +217,7 @@ ipcMain.handle("protopilot:set-api-base-url", (_event, url) => {
 
    Opens a dedicated child window with standard Chrome user-agent
    (preventing Google's disallowed_useragent block) and intercepts
-   the OAuth callback to extract session tokens directly.
+    the OAuth callback to extract session tokens directly.
    ------------------------------------------------------------ */
 ipcMain.handle("protopilot:open-oauth-popup", async (_event, provider) => {
   if (provider !== "google" && provider !== "github") {
@@ -175,6 +225,39 @@ ipcMain.handle("protopilot:open-oauth-popup", async (_event, provider) => {
   }
 
   const startUrl = `${API_BASE_URL}/auth/${provider}/login`;
+
+  // Google strictly blocks embedded Chromium WebViews ("This browser or app may not be secure").
+  // So Google OAuth MUST be opened in the user's default system browser (Chrome/Edge/Firefox).
+  if (provider === "google") {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          activeOAuthResolver = null;
+          resolve({ success: false, error: "Sign-in timed out. Please try again." });
+        }
+      }, 5 * 60 * 1000);
+
+      activeOAuthResolver = (result) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          activeOAuthResolver = null;
+          resolve(result);
+        }
+      };
+
+      shell.openExternal(startUrl).catch((err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          activeOAuthResolver = null;
+          resolve({ success: false, error: err.message || "Failed to open browser" });
+        }
+      });
+    });
+  }
 
   return new Promise((resolve) => {
     let settled = false;
@@ -334,6 +417,73 @@ const MIME_TYPES = {
 function startProductionServer(distDir) {
   return new Promise((resolve, reject) => {
     const handler = (req, res) => {
+      try {
+        const parsedUrl = new URL(req.url, `http://localhost:${appPort}`);
+        if (parsedUrl.searchParams.get("oauth") === "success") {
+          const token = parsedUrl.searchParams.get("oauth_token");
+          if (token) {
+            if (activeOAuthResolver) {
+              activeOAuthResolver({ success: true, token });
+              activeOAuthResolver = null;
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("protopilot:oauth-token-received", { token });
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.show();
+              mainWindow.focus();
+            }
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Signed in to ProtoPilot</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0B0F19; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #131A2B; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #1E293B; max-width: 440px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin: 0 0 12px; color: #38BDF8; }
+    p { color: #94A3B8; font-size: 14px; line-height: 1.5; margin: 0 0 20px; }
+    .btn { display: inline-block; background: #2563EB; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 500; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>✓ Signed in successfully!</h2>
+    <p>You can close this tab and return to the ProtoPilot desktop app.</p>
+    <a class="btn" href="protopilot://auth-callback?oauth=success&oauth_token=${encodeURIComponent(token)}">Return to ProtoPilot</a>
+  </div>
+  <script>
+    try { window.location.href = "protopilot://auth-callback?oauth=success&oauth_token=${encodeURIComponent(token)}"; } catch(e){}
+    setTimeout(() => { try { window.close(); } catch(e){} }, 2000);
+  </script>
+</body>
+</html>`);
+            return;
+          }
+        } else if (parsedUrl.searchParams.get("oauth") === "error") {
+          const errorMsg = parsedUrl.searchParams.get("error") || "Authentication failed";
+          if (activeOAuthResolver) {
+            activeOAuthResolver({ success: false, error: errorMsg });
+            activeOAuthResolver = null;
+          }
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Sign in failed — ProtoPilot</title>
+  <style>body { font-family: sans-serif; background: #0B0F19; color: #EF4444; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }</style>
+</head>
+<body>
+  <div><h2>Sign in failed: ${errorMsg}</h2><p>Please return to the ProtoPilot app and try again.</p></div>
+</body>
+</html>`);
+          return;
+        }
+      } catch (e) {
+        console.error("[server] OAuth check error:", e);
+      }
+
       let filePath = path.join(distDir, decodeURIComponent(req.url.split("?")[0]));
       if (!filePath.startsWith(distDir)) {
         res.writeHead(403);

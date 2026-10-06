@@ -223,6 +223,29 @@ export default function LoginPage({ onLogin, onGoRegister, onForgotPassword }) {
   const [verifyNotice, setVerifyNotice] = useState("");
   const [oauthLoading, setOauthLoading] = useState(null); // "google" | "github" | null
 
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.protopilotDesktop &&
+      typeof window.protopilotDesktop.onOAuthTokenReceived === "function"
+    ) {
+      const unsub = window.protopilotDesktop.onOAuthTokenReceived(async ({ token }) => {
+        if (token) {
+          setStoredToken(token);
+          try {
+            const user = await authApi.me();
+            onLogin?.(user);
+          } catch (err) {
+            setError(err.message || "Failed to fetch user profile after sign-in");
+          } finally {
+            setOauthLoading(null);
+          }
+        }
+      });
+      return unsub;
+    }
+  }, [onLogin]);
+
   const handleOAuthLogin = async (provider) => {
     setError("");
     setVerifyNotice("");

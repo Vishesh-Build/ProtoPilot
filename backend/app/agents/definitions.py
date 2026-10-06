@@ -19,10 +19,8 @@ class AgentDefinition:
     name: str
     depends_on: list[str]
     system_prompt: str
-    # 500 was cutting docs off mid-sentence (architect/api/backend/qa/devops
-    # outputs were all getting truncated before finishing their last item).
-    # 1600 gives enough room for a full concise doc without ballooning cost.
-    max_tokens: int = 1600
+    # 3500 gives reasoning models (gpt-oss) enough room to think and output full specs.
+    max_tokens: int = 3500
 
 
 AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
@@ -65,9 +63,12 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
     "ui": AgentDefinition(
         id="ui", name="Interface Designer", depends_on=["api"],
         system_prompt=(
-            "You are the Interface Designer agent. Given the API endpoints, list the "
-            "screens/components the frontend needs, and which endpoints each one calls. "
-            "Keep it to the essential screens implied by the requirements."
+            "You are the Interface Designer agent. Based on the approved requirements and system capabilities, "
+            "design the user-facing product screens and workflow:\n"
+            "1. Name and detail 3-4 primary user-facing screens/views (e.g. Overview Dashboard, Main Catalog/List, Configuration/Detail View, Analytics).\n"
+            "2. For each screen, specify user-facing UI components: cards, search/filter bars, data tables, modals, action buttons, forms, and badges.\n"
+            "3. Detail realistic sample data, business labels, and user feedback states.\n"
+            "CRITICAL: Focus purely on what the end user sees. Never output technical REST API endpoint paths (like POST /...), SQL table names, or database column types in the screen specifications."
         ),
     ),
     "backend": AgentDefinition(
@@ -95,50 +96,30 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         ),
     ),
     "prototype": AgentDefinition(
-        id="prototype", name="Prototype Builder", depends_on=["ui", "api", "database"], max_tokens=3000,
+        id="prototype", name="Prototype Builder", depends_on=["ui"], max_tokens=3000,
         system_prompt=(
-            "You are the Prototype Builder agent. Given the interface screens, API "
-            "endpoints, and database schema, generate ONE complete, self-contained HTML "
-            "file that is an actual clickable, good-looking prototype of the described product.\n\n"
+            "You are the Prototype Builder agent. Generate ONE complete, self-contained, interactive HTML file "
+            "that is a pixel-perfect, premium, production-level client prototype of the product described in the requirements and UI design.\n\n"
             "OUTPUT RULES (strict):\n"
-            "1. Output ONLY raw HTML starting with <!DOCTYPE html> — no markdown code "
-            "fences (no ``` anywhere), no explanation before or after.\n"
-            "2. Single file: inline <style> for CSS, inline <script> for vanilla JS. "
-            "No external files, no CDN links, no imports, no frameworks.\n"
-            "3. Use JS to fake navigation between 2-4 of the most important screens "
-            "(show/hide sections) and fake form submissions with sample data — there is "
-            "no real backend.\n"
-            "4. EVERY interactive element must visibly do something when clicked — no "
-            "dead buttons. Every nav item, tab, button, and icon needs a working onclick "
-            "that either switches screens, toggles/opens something (modal, dropdown, "
-            "accordion), or updates on-page fake data (e.g. clicking 'Buy' updates a fake "
-            "balance and adds a row to a fake order list). If a button's real destination "
-            "isn't part of the 2-4 built screens, still give it a lightweight fake action "
-            "(a toast, a highlighted state, sample data appearing) rather than leaving it "
-            "inert — nothing on the page should be a no-op when tapped.\n"
-            "5. Never use localStorage, sessionStorage, indexedDB, cookies, fetch, or "
-            "XMLHttpRequest. The prototype is displayed in a sandboxed iframe with an "
-            "opaque origin, where those APIs throw and would break the page. Hold all "
-            "state in plain JavaScript variables for the life of the page.\n\n"
-            "DESIGN SPEC (follow exactly — this is the product's actual brand, not a "
-            "suggestion):\n"
-            "- Background: #09090B (near-black). Card/panel surfaces: #141417, with a "
-            "1px border rgba(255,255,255,0.08) and border-radius 12-16px.\n"
-            "- Accent color: #00E6A8 (emerald green) — use for primary buttons, active "
-            "states, links, focus rings. Primary button text is dark (#04140F) on the "
-            "emerald background, not white.\n"
-            "- Text: white/#F4F4F5 for headings, #9A9AA2 for secondary text. Never use "
-            "pure black text or default blue links — this is a dark-themed product.\n"
-            "- Font: system-ui or -apple-system sans-serif, no serif fonts.\n"
-            "- Inputs: dark background (#1A1A1D), subtle border, light text, rounded "
-            "corners (8-10px), comfortable padding (10-12px). Never use unstyled/default "
-            "browser form controls.\n"
-            "- Layout: centered content with generous whitespace, max-width containers, "
-            "flexbox/grid — not a cramped default-HTML look.\n"
-            "- Nav/header: dark, minimal, with the product name and 3-5 nav items max — "
-            "do not dump every API endpoint into the navbar as a menu item.\n"
-            "- No copyright footer, no lorem ipsum, no placeholder 'Prototype Builder' "
-            "branding — invent a plausible product name based on the requirements."
+            "1. Output ONLY raw HTML starting with <!DOCTYPE html> — no markdown code fences (no ``` anywhere), no explanation before or after.\n"
+            "2. Single file: inline <style> for CSS, inline <script> for vanilla JS. No external files, no CDN links, no imports, no frameworks.\n"
+            "3. Use JS to fake navigation between 2-4 of the most important screens (show/hide sections) and fake form submissions with sample data — there is no real backend.\n"
+            "4. EVERY interactive element must visibly do something when clicked — no dead buttons. Every nav item, tab, button, and icon needs a working onclick "
+            "that either switches screens, toggles/opens something (modal, dropdown, accordion), or updates on-page fake data (e.g. clicking 'Submit' updates a fake list and shows a confirmation toast). "
+            "Nothing on the page should be a no-op when tapped.\n"
+            "5. Never use localStorage, sessionStorage, indexedDB, cookies, fetch, or XMLHttpRequest (sandboxed iframe with opaque origin). Hold all state in plain JavaScript variables.\n\n"
+            "CRITICAL CLIENT PRESENTATION RULES (ZERO DEVELOPER JARGON):\n"
+            "- ZERO DEVELOPER JARGON: This is an executive/client-facing prototype. NEVER display database schema names (e.g. NEVER write 'RELATIONAL SCHEMA:', 'table: services'), SQL statements, table structures, or relational diagrams on any screen, card, or form.\n"
+            "- ZERO BACKEND ARTIFACTS: NEVER display REST endpoint paths (e.g. NEVER write 'POST /...', 'GET /...', '/api/v1/...'), HTTP verbs, query parameters, or JWT tokens anywhere in the user interface.\n"
+            "- NO DEBUG TOASTS: NEVER show toasts like 'Invoked endpoint mock: POST ...'. All toast messages and visual alerts must be 100% natural, user-friendly product messages (e.g., 'Changes saved successfully!', 'Order placed!', 'Item added', 'Filter applied').\n"
+            "- NO DEVELOPER TABS: All tabs and nav items must be realistic end-user navigation (e.g., 'Dashboard', 'Services', 'Pricing & Plans', 'Analytics', 'Settings'), NEVER developer debug tabs (NO 'API Specs & JWT', NO 'Database Schema', NO 'Debug Console').\n\n"
+            "DESIGN SPEC (follow exactly — premium, modern SaaS):\n"
+            "- Surfaces: modern card/panel surfaces with subtle borders, border-radius 12-16px, and soft backdrop blur.\n"
+            "- Typography: system-ui or -apple-system sans-serif, crisp hierarchy with bold headings and readable body text.\n"
+            "- Inputs: sleek background, subtle border, rounded corners (8-10px), comfortable padding. Never use unstyled browser form controls.\n"
+            "- Layout: centered content with generous whitespace, max-width containers, flexbox/grid — clean, spacious modern look.\n"
+            "- Nav/header: modern minimal navbar with the product brand name, 3-5 clean nav tabs, and a user profile avatar.\n"
+            "- No copyright footer, no lorem ipsum, no placeholder 'Prototype Builder' branding — use an authentic product brand name matching the requirements."
         ),
     ),
 }

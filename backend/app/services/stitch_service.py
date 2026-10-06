@@ -141,41 +141,103 @@ async def _get_or_create_project(session: "ClientSession") -> str:
     return project_id
 
 
+def sanitize_prototype_html(html: str) -> str:
+    """
+    Guarantees no rogue developer artifacts (like 'RELATIONAL SCHEMA', 'POST /...',
+    'Invoked endpoint mock') leak into the rendered client prototype.
+    """
+    if not html:
+        return html
+    # 1. Clean debug toast messages like: Invoked endpoint mock: POST /api/v1/...
+    html = re.sub(
+        r'Invoked endpoint mock:\s*(?:GET|POST|PUT|DELETE|PATCH)\s*[^<"\']+',
+        'Action completed successfully',
+        html,
+        flags=re.IGNORECASE,
+    )
+    html = re.sub(
+        r'Invoked endpoint mock[^<"\']*',
+        'Action completed successfully',
+        html,
+        flags=re.IGNORECASE,
+    )
+    # 2. Clean relational schema headers: 1. RELATIONAL SCHEMA: `SERVICES`
+    html = re.sub(
+        r'([0-9]+\.\s*)?RELATIONAL SCHEMA:\s*`?[A-Za-z0-9_]+`?',
+        'General Configuration',
+        html,
+        flags=re.IGNORECASE,
+    )
+    # 3. Clean schema endpoint labels: 2. Schema: `service_pricing` POST /services/{id}/pricing
+    html = re.sub(
+        r'([0-9]+\.\s*)?Schema:\s*`?[a-z0-9_]+`?\s*(?:POST|GET|PUT|DELETE|PATCH)\s*/[^\s<"]+',
+        'Pricing & Plans',
+        html,
+        flags=re.IGNORECASE,
+    )
+    # 4. Clean general Schema: `table_name`
+    html = re.sub(
+        r'([0-9]+\.\s*)?Schema:\s*`?[a-z0-9_]+`?',
+        'Section Details',
+        html,
+        flags=re.IGNORECASE,
+    )
+    # 5. Clean rogue Endpoint: POST /...
+    html = re.sub(
+        r'Endpoint:\s*(?:POST|GET|PUT|DELETE|PATCH)\s*[^\s<"]*',
+        'Status: Live',
+        html,
+        flags=re.IGNORECASE,
+    )
+    # 6. Clean raw badges / spans showing HTTP methods and paths e.g. POST /services/{id}/images
+    html = re.sub(
+        r'(POST|GET|PUT|DELETE|PATCH)\s+/(?:api/v[0-9]+/)?(?:[a-zA-Z0-9_\-\{\}\/]+)',
+        'Active',
+        html,
+    )
+    # 7. Clean developer debug tabs and actions
+    html = re.sub(
+        r'API Specs\s*(?:&amp;|&)\s*JWT',
+        'System Settings',
+        html,
+        flags=re.IGNORECASE,
+    )
+    html = re.sub(
+        r'Refresh JWT',
+        'Sync Status',
+        html,
+        flags=re.IGNORECASE,
+    )
+    return html
+
+
 def _build_stitch_prompt(context: str) -> str:
     """
-    Turns the UI/API/Database agents' output into a design brief Stitch
-    can work from, plus the product's default style direction — Stitch
-    reads style instructions fine from plain English, unlike a raw HTML
-    system prompt.
-
-    The default color/theme direction is set once, in
-    settings.stitch_style_direction (app/config.py) — edit that if you
-    want every generation to default to a different look. If the
-    requirements/context themselves mention a specific color scheme or
-    theme (e.g. someone said "make it blue and white" in the meeting and
-    that became a requirement), that explicit instruction is told to
-    take priority over the default here.
+    Turns the approved requirements and UI spec into a design brief Stitch
+    can work from, plus the product's default style direction.
     """
     return (
         "Design a premium, modern, production-level SaaS product UI based on "
-        "the following product spec (screens, API endpoints, and data model). "
-        "This should look like a real AI startup product, not a generic "
-        "template.\n\n"
+        "the following client product specifications and screens:\n\n"
         f"{context}\n\n"
+        "CRITICAL CLIENT PRESENTATION RULES (ZERO DEVELOPER JARGON):\n"
+        "- This is an executive/client-facing prototype. NEVER display database schema names "
+        "(e.g. 'RELATIONAL SCHEMA:', 'Schema:'), SQL tables, or backend API endpoints "
+        "(e.g. 'POST /...', 'GET /...', '/api/v1/...') on any screen, card, form, or button.\n"
+        "- NEVER include developer debug tabs (no 'API Specs & JWT', no debug terminals).\n"
+        "- All forms, buttons, cards, and tables must have clean, human-friendly business labels "
+        "(e.g. 'Service Details', 'Pricing Plan', 'Banner Media', 'Save Changes').\n"
+        "- All user feedback and toasts must be natural end-user messages (e.g. 'Saved successfully', 'Created new service'), "
+        "NEVER debug messages like 'Invoked endpoint mock: POST ...'.\n\n"
         "Style direction: minimal, futuristic, premium, clean, responsive, "
         "with subtle glassmorphism on cards/panels, smooth transitions, "
         "modern typography, rounded cards, and excellent spacing/whitespace. "
         "The layout must be fully responsive — use fluid widths, flexbox/"
         "grid, and sensible breakpoints so it looks correct on both "
         "desktop and mobile viewports, not just one fixed width. "
-        "If the product spec above states or implies a specific color "
-        "palette, theme, or brand direction, follow that instead of "
-        "anything below — an explicit instruction in the spec always wins. "
-        f"Otherwise, default to this look: {settings.stitch_style_direction}\n\n"
-        "Invent a plausible product name — no placeholder branding, no "
-        "lorem ipsum.\n\n"
-        "Interactivity (important — this is a clickable prototype, not a "
-        "static mock): every button, tab, icon, toggle, and form on the "
+        f"Default look: {settings.stitch_style_direction}\n\n"
+        "Invent a plausible product name — no placeholder branding, no lorem ipsum.\n\n"
+        "Interactivity: every button, tab, icon, toggle, and form on the "
         "screen must have working inline JS so clicking it visibly does "
         "something — switch a tab, open/close a panel, update a number or "
         "list on the page with sample data, show a brief confirmation, etc. "
@@ -491,21 +553,18 @@ async def generate_prototype_html(context: str) -> str | None:
     returns an empty/transient response; a single retry clears that
     without wasting a whole pipeline run on a one-off blip.
     """
-    if not settings.stitch_api_key:
+    if not settings.stitch_enabled or not settings.stitch_api_key:
         return None
 
-    last_error: Exception | None = None
-    for attempt in range(1, 3):  # try once, then one retry
-        try:
-            return await _generate_prototype_html_once(context)
-        except Exception as e:  # noqa: BLE001 — retry once, then fall back to LLM
-            last_error = e
-            logger.warning("Stitch attempt %d/2 failed: %s", attempt, e)
-            if attempt < 2:
-                await asyncio.sleep(2)
-
-    logger.exception("Stitch generation failed after retry, falling back to LLM.", exc_info=last_error)
-    return None
+    try:
+        # Strict 10-second ceiling on external Stitch MCP call to prevent prototype generation stalls
+        return await asyncio.wait_for(_generate_prototype_html_once(context), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.warning("Stitch MCP generation timed out (>10s) — fast failover to direct LLM prototype builder.")
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Stitch MCP generation failed (%s) — fast failover to direct LLM prototype builder.", e)
+        return None
 
 
 async def _generate_prototype_html_once(context: str) -> str | None:
@@ -546,6 +605,6 @@ async def _generate_prototype_html_once(context: str) -> str | None:
             resp.raise_for_status()
             htmls.append(resp.text)
 
-    combined = _combine_screens(screens, htmls)
+    combined = sanitize_prototype_html(_combine_screens(screens, htmls))
     logger.info("Stitch: combined %d screen(s) into %d bytes of HTML.", len(screens), len(combined))
     return combined
