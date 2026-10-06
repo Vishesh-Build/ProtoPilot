@@ -334,16 +334,25 @@ export const meetingsApi = {
 
   exportUrl: (meetingId) => `${API_BASE_URL}/meetings/${meetingId}/export`,
 
-  transcriptSocketUrl: (meetingId) =>
-    `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}`,
+  transcriptSocketUrl: (meetingId) => {
+    const token = getStoredToken();
+    const base = `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  },
 
   // force=true skips the backend's replay-of-existing-outputs guard, so the
   // host pressing "Regenerate" re-runs over the currently-approved
   // requirements (picking up anything approved since the last build) instead
   // of getting the stale prototype back. Opening it without force is a plain
   // (free) replay of what's already there.
-  generateSocketUrl: (meetingId, { force = false } = {}) =>
-    `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}/generate${force ? "?force=1" : ""}`,
+  generateSocketUrl: (meetingId, { force = false } = {}) => {
+    const token = getStoredToken();
+    const params = new URLSearchParams();
+    if (force) params.set("force", "1");
+    if (token) params.set("token", token);
+    const qs = params.toString();
+    return `${API_BASE_URL.replace(/^http/, "ws")}/ws/meeting/${meetingId}/generate${qs ? `?${qs}` : ""}`;
+  },
 
   cancelGeneration: (meetingId) =>
     request(`/meetings/${meetingId}/cancel-generation`, { method: "POST" }),

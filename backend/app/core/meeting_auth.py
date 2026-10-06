@@ -45,16 +45,23 @@ async def require_meeting_host(
 
 async def get_ws_user_id(websocket: WebSocket) -> str | None:
     """
-    Resolves the access-token cookie on a WebSocket handshake into a user_id.
-    Returns None (never raises) — websocket callers close() the connection
-    themselves with a proper code/reason instead of an HTTP exception.
+    Resolves the access-token from cookies, query parameters (?token=),
+    or Authorization header on a WebSocket handshake into a user_id.
     """
     import jwt as _jwt
     from app.core.security import decode_access_token
 
     token = websocket.cookies.get("access_token")
     if not token:
+        token = websocket.query_params.get("token") or websocket.query_params.get("access_token")
+    if not token:
+        auth_header = websocket.headers.get("authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+    if not token:
         return None
+
+    token = token.strip().replace('"', '').replace("'", "")
     try:
         return decode_access_token(token)
     except _jwt.PyJWTError:
