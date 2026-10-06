@@ -315,7 +315,7 @@ def _build_fallback_prototype_html(
     """
     import html as html_lib
 
-    product_name = "FleetOps Enterprise"
+    product_name = "Enterprise Application"
     features: list[dict[str, str]] = []
 
     if requirements_block:
@@ -324,7 +324,7 @@ def _build_fallback_prototype_html(
             if line.startswith("-"):
                 clean = re.sub(r"^-\s*\[(?:HIGH|MED|LOW)\]\s*", "", line)
                 cat_match = re.search(r"\(([^)]+)\)$", clean)
-                category = cat_match.group(1) if cat_match else "Operational Module"
+                category = cat_match.group(1) if cat_match else "Core Module"
                 title = re.sub(r"\s*\([^)]+\)$", "", clean).strip()
                 if title:
                     features.append({"title": title, "category": category})
@@ -342,46 +342,43 @@ def _build_fallback_prototype_html(
                 product_name = cand
         elif features:
             product_name = features[0]["title"]
+    elif features:
+        product_name = features[0]["title"]
 
     if not features:
         features = [
-            {"title": "Real-time Vehicle & Fleet Telemetry", "category": "Operations"},
-            {"title": "Driver Dispatch & Route Optimization", "category": "Logistics"},
-            {"title": "Automated Trip Scheduling & Tracking", "category": "Fulfillment"},
-            {"title": "Incident & Fuel Efficiency Telemetry", "category": "Analytics"},
-            {"title": "Emergency Dispatch & Priority Escalation", "category": "Security"},
+            {"title": "User Authentication & Authorization", "category": "Security"},
+            {"title": "Real-time Operational Telemetry", "category": "Analytics"},
+            {"title": "Automated Workflow Engine", "category": "Automation"},
+            {"title": "Interactive Management Portal", "category": "Operations"},
+            {"title": "Notification & Alert Delivery", "category": "Communications"},
         ]
 
     safe_product_name = html_lib.escape(product_name)
 
-    # Build rich sample records (NO skeleton bars, REAL rich data!)
-    sample_records = [
-        {"id": "TRP-8402", "route": "Austin Logistics Hub → Dallas Terminal", "lead": "Marcus Vance", "asset": "Mercedes Sprinter #42", "status": "En Route", "metric": "ETA 14:20"},
-        {"id": "TRP-8403", "route": "Denver Freight Corridor Express", "lead": "Sarah Jenkins", "asset": "Volvo VNL 760 #19", "status": "Delivered", "metric": "On Time (99.8%)"},
-        {"id": "TRP-8404", "route": "Chicago Gateway → Detroit Assembly", "lead": "Elena Rostova", "asset": "Freightliner Cascadia #08", "status": "En Route", "metric": "ETA 16:45"},
-        {"id": "TRP-8405", "route": "Phoenix Transit → San Diego Dock", "lead": "David Kim", "asset": "Kenworth T680 #14", "status": "Scheduled", "metric": "Departs 18:00"},
-        {"id": "TRP-8406", "route": "Seattle Intermodal → Portland Depot", "lead": "Amara Okafor", "asset": "Peterbilt 579 #31", "status": "Delivered", "metric": "Completed"},
-        {"id": "TRP-8407", "route": "Atlanta Southeast Distribution Hub", "lead": "Jackson Reed", "asset": "Volvo VNL #27", "status": "En Route", "metric": "ETA 19:15"},
-    ]
-
+    # Dynamically build rich rows directly from customer requirements (NO hardcoding!)
     table_rows_html = ""
-    for r in sample_records:
-        status_color = "#00e6a8" if r["status"] == "En Route" else ("#60a5fa" if r["status"] == "Delivered" else "#a78bfa")
-        bg_color = "rgba(0,230,168,0.12)" if r["status"] == "En Route" else ("rgba(96,165,250,0.12)" if r["status"] == "Delivered" else "rgba(167,139,250,0.12)")
+    for idx, feat in enumerate(features[:10], start=1):
+        r_id = f"REQ-{idx:02d}"
+        r_title = feat["title"]
+        r_cat = feat["category"]
+        status = "Active" if idx % 2 == 1 else "Ready"
+        status_color = "#00e6a8" if status == "Active" else "#60a5fa"
+        bg_color = "rgba(0,230,168,0.12)" if status == "Active" else "rgba(96,165,250,0.12)"
         table_rows_html += f"""
-        <tr id="row-{r['id']}">
-            <td style="padding:14px 18px; font-weight:700; color:#f8fafc; font-family:monospace; font-size:13px;">{r['id']}</td>
+        <tr id="row-{r_id}">
+            <td style="padding:14px 18px; font-weight:700; color:#f8fafc; font-family:monospace; font-size:13px;">{r_id}</td>
             <td style="padding:14px 18px; font-weight:600; color:#f1f5f9;">
-                <div>{r['route']}</div>
-                <div style="font-size:12px; color:#94a3b8; margin-top:2px; font-weight:400;">Unit: {r['asset']} • Lead: {r['lead']}</div>
+                <div>{html_lib.escape(r_title)}</div>
+                <div style="font-size:12px; color:#94a3b8; margin-top:2px; font-weight:400;">Category: {html_lib.escape(r_cat)} • Verified Module</div>
             </td>
-            <td style="padding:14px 18px; font-size:13px; color:#cbd5e1;">{r['metric']}</td>
+            <td style="padding:14px 18px; font-size:13px; color:#cbd5e1;">Enterprise Grade</td>
             <td style="padding:14px 18px;">
-                <span class="badge" style="background:{bg_color}; color:{status_color}; border:1px solid {status_color}; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700;">{r['status']}</span>
+                <span class="badge" style="background:{bg_color}; color:{status_color}; border:1px solid {status_color}; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700;">{status}</span>
             </td>
             <td style="padding:14px 18px; text-align:right;">
-                <button class="action-btn" onclick="toggleStatus('row-{r['id']}')" style="background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; margin-right:6px;">Toggle</button>
-                <button class="action-btn" onclick="deleteRow('row-{r['id']}')" style="background:#2d1a1f; color:#f87171; border:1px solid #7f1d1d; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">Delete</button>
+                <button class="action-btn" onclick="toggleStatus('row-{r_id}')" style="background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; margin-right:6px;">Toggle</button>
+                <button class="action-btn" onclick="deleteRow('row-{r_id}')" style="background:#2d1a1f; color:#f87171; border:1px solid #7f1d1d; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">Delete</button>
             </td>
         </tr>"""
 
