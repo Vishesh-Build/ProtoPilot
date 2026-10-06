@@ -1,444 +1,99 @@
-We need to produce a single HTML file with inline CSS and JS. Must implement interactive navigation between screens: dashboard, restaurant detail, cart, order tracking. Provide fake data. All interactive elements must do something. No external libs. Use vanilla JS.
-
-We need to create a modern UI with cards, header, etc. Use CSS for styling. Provide modals for location change, notifications, etc. But we can keep simple.
-
-We need to implement:
-
-- Header with location selector, notification bell with badge, profile avatar.
-
-- Search bar with suggestions dropdown.
-
-- Promotional carousel: horizontal scrollable cards with "View Menu" button.
-
-- Category chips.
-
-- Restaurant list grid.
-
-- Restaurant detail view with header, menu tabs, menu items, add to cart.
-
-- Cart summary bar.
-
-- Cart & Checkout view with header, items list, promo code, order summary, delivery details, payment methods, place order button.
-
-- Order tracking & history view with header, filter tabs, active order card, order history list.
-
-- Navigation between screens: clicking restaurant card goes to detail view; clicking "View Cart" goes to cart; clicking "Place Order" goes to order confirmation (maybe just a toast). Also "Your Orders" maybe accessible via a nav tab? But we can add a nav bar with "Home", "Orders". We'll keep minimal.
-
-- For admin features, we can ignore as not required for client-facing prototype.
-
-- Provide modals: location change, notifications, cancel confirmation.
-
-- Provide toast notifications.
-
-- Use CSS for card surfaces, border radius, backdrop blur.
-
-- Use system-ui font.
-
-- Provide skeleton screens? We can skip skeleton for brevity.
-
-- Provide sample data: 3 restaurants, 2 promos, 3 menu items.
-
-- Provide interactive stepper for cart.
-
-- Provide toast notifications.
-
-- Provide progress tracker in order tracking.
-
-- Provide map preview placeholder.
-
-- Provide ability to add items to cart, update cart count, show cart summary bar.
-
-- Provide ability to apply promo code.
-
-- Provide ability to place order: simulate processing, then navigate to order confirmation screen (maybe just a toast).
-
-- Provide ability to cancel order: modal.
-
-- Provide ability to reorder: add items to cart and navigate to cart.
-
-- Provide ability to edit delivery address: modal.
-
-- Provide ability to schedule delivery: modal.
-
-- Provide ability to change payment method: radio selection.
-
-- Provide ability to add new payment method: modal.
-
-- Provide ability to view notifications: modal.
-
-- Provide ability to change location: modal.
-
-- Provide ability to search: suggestions dropdown.
-
-- Provide ability to filter categories: chips.
-
-- Provide ability to navigate between tabs: Home, Orders.
-
-- Provide ability to go back: back button.
-
-- Provide ability to open profile: maybe just a toast.
-
-- Provide ability to open menu: "View Menu" button.
-
-- Provide ability to view cart: "View Cart" button.
-
-- Provide ability to place order: "Place Order" button.
-
-- Provide ability to cancel order: modal.
-
-- Provide ability to reorder: add items to cart.
-
-- Provide ability to apply promo code: success or error.
-
-- Provide ability to edit delivery details: modal.
-
-- Provide ability to schedule delivery: modal.
-
-- Provide ability to add new payment method: modal.
-
-- Provide ability to view notifications: modal.
-
-- Provide ability to change location: modal.
-
-- Provide ability to view cart summary bar: appears when cart not empty.
-
-- Provide ability to show toast notifications: "Item added to cart", "Changes saved", etc.
-
-- Provide ability to show progress tracker: step indicator.
-
-- Provide ability to show map preview: placeholder.
-
-- Provide ability to show contact driver: just a toast.
-
-- Provide ability to show cancel order: modal.
-
-- Provide ability to show reorder: add items to cart.
-
-- Provide ability to show order confirmation: maybe a simple overlay.
-
-- Provide ability to show order history: list.
-
-- Provide ability to show active order: card.
-
-- Provide ability to show filter tabs: Active, Past.
-
-- Provide ability to show order status: "Preparing", "On the Way", "Delivered".
-
-- Provide ability to show progress tracker: 4 steps.
-
-- Provide ability to show ETA.
-
-- Provide ability to show map preview: placeholder.
-
-- Provide ability to show contact driver: toast.
-
-- Provide ability to show cancel order: modal.
-
-- Provide ability to show reorder: add items to cart.
-
-- Provide ability to show reorder: add items to cart.
-
-- Provide ability to show reorder: add items to cart.
-
-- Provide ability to show reorder: add items to cart.
-
-- Provide ability to show reorder: add items to cart.
-
-- Provide ability to show reorder: add items to cart.
-
-Ok.
-
-Implementation details:
-
-- Use a global state object: { cart: [], orders: [], location: "123 Main St", notifications: [], etc. }
-
-- For modals, we can create a simple modal overlay with content and close button.
-
-- For toast, create a toast container that shows messages for a few seconds.
-
-- For navigation, we can have sections with id: "home", "restaurant", "cart", "orders", "order-confirmation". Show/hide by setting display: none/block.
-
-- Use event listeners to handle clicks.
-
-- Use CSS flexbox and grid.
-
-- Use CSS for card surfaces: background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); backdrop-filter: blur(10px); but we can skip backdrop filter for simplicity.
-
-- Use system-ui font: font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-
-- Use subtle border: 1px solid #e0e0e0.
-
-- Use color palette: primary blue (#0066ff), secondary gray (#666), success green (#28a745), error red (#dc3545), etc.
-
-- Use icons: we can use simple Unicode characters or inline SVG.
-
-- For star rating, use Unicode star or simple icons.
-
-- For stepper, use minus and plus icons.
-
-- For progress tracker, use simple circles.
-
-- For map preview, use placeholder image.
-
-- For notifications, use a simple list.
-
-- For modals, use absolute positioning.
-
-- For toast, use fixed bottom center.
-
-- For skeleton screens, skip.
-
-- For search suggestions, we can show a simple dropdown with sample suggestions.
-
-- For category chips, we can have a list of categories.
-
-- For carousel, we can use CSS scroll-snap.
-
-- For sticky header, we can use position: sticky.
-
-- For sticky bottom cart summary bar, we can use position: sticky bottom.
-
-- For back button, we can use arrow icon.
-
-- For back navigation, we can use a stack or simply set current view.
-
-- For "View Cart" button, we navigate to cart.
-
-- For "Place Order", we simulate processing: disable button, show spinner, after 2 seconds show order confirmation.
-
-- For order confirmation, we can show a simple overlay with message and "Back to Home" button.
-
-- For order tracking, we can show active order card with status and progress tracker.
-
-- For order history, we can show list of past orders.
-
-- For reorder, we can add items to cart and navigate to cart.
-
-- For cancel order, we show modal.
-
-- For contact driver, we show toast.
-
-- For editing delivery address, we show modal.
-
-- For scheduling delivery, we show modal.
-
-- For adding new payment method, we show modal.
-
-- For applying promo code, we check if code matches "SAVE10" and apply discount.
-
-- For cart summary bar, we show total items and price.
-
-- For cart items list, we show each item with quantity stepper and remove icon.
-
-- For stepper, we can use minus and plus icons.
-
-- For toast, we can create a function showToast(message, type).
-
-- For modals, we can create a function openModal(content) and closeModal().
-
-- For navigation, we can create a function showSection(id).
-
-- For state, we can have:
-
-```
-const state = {
-  location: "123 Main St",
-  cart: [],
-  orders: [],
-  notifications: [],
-  promoCode: null,
-  paymentMethod: null,
-  deliveryTime: "ASAP",
-  deliveryAddress: "123 Main St",
-  activeOrder: null,
-};
-```
-
-- For restaurants data, we can define an array of objects.
-
-- For menu items, we can define nested arrays.
-
-- For order status, we can simulate status changes.
-
-- For progress tracker, we can show steps with icons.
-
-- For map preview, we can use placeholder.
-
-- For icons, we can use simple inline SVG or Unicode.
-
-- For spinner, we can use CSS animation.
-
-- For toast, we can use CSS transitions.
-
-- For modals, we can use CSS to show/hide.
-
-- For search suggestions, we can filter sample data.
-
-- For category chips, we can filter restaurants.
-
-- For "View Menu" button, we navigate to restaurant detail.
-
-- For "Add" button, we add to cart.
-
-- For "View Cart" button, we navigate to cart.
-
-- For "Place Order", we create an order object, push to orders, set activeOrder.
-
-- For order confirmation, we show overlay.
-
-- For order tracking, we show active order card.
-
-- For order history, we show orders with status "Delivered" or "Cancelled".
-
-- For reorder, we add items to cart and navigate to cart.
-
-- For cancel order, we remove activeOrder.
-
-- For contact driver, we show toast.
-
-- For editing delivery address, we show modal.
-
-- For scheduling delivery, we show modal.
-
-- For adding new payment method, we show modal.
-
-- For notifications, we show modal.
-
-- For location selector, we show modal.
-
-- For profile avatar, we show toast.
-
-- For back button, we navigate back to previous section.
-
-- For nav tabs, we can have "Home" and "Orders".
-
-- For "Orders" tab, we show order tracking & history view.
-
-- For "Home" tab, we show dashboard.
-
-- For "Cart" view, we show cart & checkout.
-
-- For "Restaurant" view, we show restaurant detail.
-
-- For "Order Confirmation" view, we show overlay.
-
-- For "Order Tracking" view, we show active order card and history.
-
-- For "Order History" view, we show past orders.
-
-- For "Active" filter, we show active orders; for "Past" filter, show past orders.
-
-- For "Active" filter, we show active order card; for "Past" filter, we show past orders list.
-
-- For "Active" filter, we show active order card.
-
-- For "Past" filter, we show past orders list.
-
-- For "Active" filter, we show active order card.
-
-- For "Past" filter, we show past orders list.
-
-- For "Active" filter, we show active order card.
-
-- For "Past" filter, we show past orders list.
-
-- For "Active" filter, we show active order card.
-
-- For "Past" filter, we show past orders list.
-
-Ok.
-
-Now we need to produce the final HTML file.
-
-We need to ensure no external resources, no CDN.
-
-We need to use inline CSS and JS.
-
-We need to ensure all interactive elements have onclick.
-
-We need to ensure no dead buttons.
-
-We need to ensure no developer jargon.
-
-We need to ensure no backend artifacts.
-
-Ok.
-
-Let's design the structure:
-
-```
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>FoodieGo</title>
+<title>FoodieGo – Order & Track Your Favorite Meals</title>
 <style>
-  /* CSS */
+:root{
+  --bg:#f9fafb;
+  --card:#fff;
+  --accent:#ff6b6b;
+  --accent-dark:#ff4e4e;
+  --text:#333;
+  --subtext:#666;
+  --border:#e0e0e0;
+  --radius:12px;
+  --shadow:0 2px 8px rgba(0,0,0,0.05);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;}
+header{background:var(--card);padding:16px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow);position:sticky;top:0;z-index:10;}
+header .location{background:#f0f0f0;border-radius:999px;padding:6px 12px;cursor:pointer;}
+header .search{flex:1;margin:0 12px;}
+header .search input{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#fafafa;}
+header .profile{width:32px;height:32px;border-radius:50%;background:#ccc;}
+main{max-width:480px;margin:auto;padding:16px;}
+section{display:none;}
+section.active{display:block;}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px;}
+.card img{width:100%;height:180px;object-fit:cover;}
+.card-content{padding:12px;}
+.card-title{font-weight:bold;font-size:1.1rem;margin-bottom:4px;}
+.card-meta{font-size:.9rem;color:var(--subtext);display:flex;gap:8px;flex-wrap:wrap;}
+.badge{background:#e0e0e0;color:#555;font-size:.75rem;padding:2px 6px;border-radius:999px;}
+.badge.green{background:#e0f8e0;color:#2d7a2d;}
+.badge.gray{background:#f0f0f0;color:#777;}
+.badge.star{background:#ffe58f;color:#c48e00;}
+.chips{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto;}
+.chip{background:#f0f0f0;color:#555;padding:6px 12px;border-radius:999px;cursor:pointer;white-space:nowrap;}
+.chip.active{background:var(--accent);color:#fff;}
+.banner{background:var(--accent);color:#fff;padding:12px;border-radius:var(--radius);display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.banner button{background:#fff;color:var(--accent);border:none;padding:6px 12px;border-radius:999px;cursor:pointer;}
+.menu-header{display:flex;align-items:center;gap:8px;}
+.menu-header button{background:none;border:none;font-size:1.2rem;cursor:pointer;}
+.menu-tabs{display:flex;gap:8px;margin-bottom:8px;overflow-x:auto;}
+.menu-tabs button{background:#f0f0f0;border:none;padding:6px 12px;border-radius:999px;cursor:pointer;}
+.menu-tabs button.active{background:var(--accent);color:#fff;}
+.menu-item{display:flex;gap:12px;padding:12px;border-bottom:1px solid var(--border);}
+.menu-item img{width:80px;height:80px;border-radius:8px;object-fit:cover;}
+.menu-item-details{flex:1;}
+.menu-item-name{font-weight:bold;margin-bottom:4px;}
+.menu-item-desc{font-size:.9rem;color:var(--subtext);margin-bottom:4px;}
+.menu-item-price{font-weight:bold;}
+.menu-item-availability{font-size:.8rem;color:var(--subtext);}
+.menu-item-add{display:flex;align-items:center;gap:4px;}
+.menu-item-add button{background:var(--accent);color:#fff;border:none;width:32px;height:32px;border-radius:50%;font-size:1.2rem;cursor:pointer;}
+.menu-item-add button:disabled{background:#ccc;cursor:not-allowed;}
+.cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--card);padding:12px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow);}
+.cart-bar button{background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:999px;cursor:pointer;}
+.cart-bar span{font-weight:bold;}
+.cart-item{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--border);}
+.cart-item img{width:60px;height:60px;border-radius:8px;object-fit:cover;}
+.cart-item-details{flex:1;}
+.cart-item-name{font-weight:bold;margin-bottom:4px;}
+.cart-item-custom{font-size:.9rem;color:var(--subtext);}
+.cart-item-qty{display:flex;align-items:center;gap:4px;}
+.cart-item-qty button{background:#f0f0f0;border:none;width:24px;height:24px;border-radius:50%;font-size:1rem;cursor:pointer;}
+.cart-item-qty span{min-width:16px;text-align:center;}
+.cart-item-price{font-weight:bold;}
+.cart-item-remove{background:none;border:none;font-size:1.2rem;color:#999;cursor:pointer;}
+.cart-summary{background:var(--card);padding:12px;border-radius:var(--radius);box-shadow:var(--shadow);margin-top:12px;}
+.cart-summary h3{margin-bottom:8px;}
+.cart-summary div{display:flex;justify-content:space-between;margin-bottom:4px;}
+.cart-summary .total{font-weight:bold;font-size:1.1rem;}
+.payment-method{display:flex;gap:12px;margin-top:12px;}
+.payment-method label{display:flex;align-items:center;gap:4px;}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:8px 16px;border-radius:999px;animation:fadein 0.3s;}
+@keyframes fadein{0%{opacity:0;}100%{opacity:1;}}
+.modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;justify-content:center;}
+.modal-content{background:var(--card);width:100%;max-height:80%;border-top-left-radius:16px;border-top-right-radius:16px;overflow-y:auto;padding:16px;}
+.modal-close{position:absolute;top:8px;right:16px;font-size:1.5rem;color:#999;cursor:pointer;}
+.map-placeholder{background:#e0e0e0;height:200px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#777;}
 </style>
 </head>
 <body>
-  <!-- Nav -->
-  <header id="app-header">
-    <div id="nav-tabs">
-      <button data-view="home" class="nav-tab active">Home</button>
-      <button data-view="orders" class="nav-tab">Orders</button>
-    </div>
-    <div id="header-right">
-      <button id="location-btn">Deliver to: 123 Main St</button>
-      <button id="notifications-btn">🔔<span id="notif-badge">3</span></button>
-      <button id="profile-btn">👤</button>
-    </div>
-  </header>
-
-  <!-- Sections -->
-  <section id="home" class="view active">
-    <!-- Search bar -->
-    <!-- Carousel -->
-    <!-- Category chips -->
-    <!-- Restaurant list -->
-  </section>
-
-  <section id="restaurant" class="view">
-    <!-- Header with back -->
-    <!-- Menu tabs -->
-    <!-- Menu items -->
-  </section>
-
-  <section id="cart" class="view">
-    <!-- Header with back -->
-    <!-- Cart items list -->
-    <!-- Promo code -->
-    <!-- Order summary -->
-    <!-- Delivery details -->
-    <!-- Payment methods -->
-    <!-- Place order button -->
-  </section>
-
-  <section id="orders" class="view">
-    <!-- Header with filter tabs -->
-    <!-- Active order card -->
-    <!-- Past orders list -->
-  </section>
-
-  <section id="order-confirmation" class="view">
-    <!-- Confirmation message -->
-  </section>
-
-  <!-- Modals -->
-  <div id="modal" class="modal hidden">
-    <div class="modal-content">
-      <button class="modal-close" onclick="closeModal()">✖</button>
-      <div id="modal-body"></div>
-    </div>
-  </div>
-
-  <!-- Toast -->
-  <div id="toast-container"></div>
-
-  <script>
-    // JS
-  </script>
-
+<header>
+  <div class="location" id="location-selector">Deliver to: Home</div>
+  <div class="search"><input type="text" id="search-input" placeholder="Search for restaurants or dishes"></div>
+  <div class="profile"></div>
+</header>
+<main id="app-main">
+  <!-- Home Screen -->
+  <section id="home-screen" class="active">
+    <div class="chips" id="category-chips"></div>
+    <div id="restaurant-list"></div>
+    <div class="banner">
+      <span>Get 20% off your first
 <script>
 (function () {
   function alreadyHandled(el) {
@@ -475,16 +130,3 @@ Let's design the structure:
   }, true);
 })();
 </script>
-</body>
-</html>
-```
-
-We need to fill in each section with appropriate content.
-
-Let's design CSS:
-
-- body: margin: 0; font-family: system-ui; background: #f5f5f5; color: #333; line-height: 1.6;
-
-- header: display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-
-- nav-tab: border: none; background: none; padding: 10px 15px; cursor: pointer; font-weight: 600; color: #333; border-bottom: 2px solid transparent; transition: border-color

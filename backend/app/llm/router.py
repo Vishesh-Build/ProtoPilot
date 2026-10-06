@@ -91,9 +91,9 @@ class LLMRouter:
     # requirement point is worthless if it lands a minute late, so when the
     # provider does not say how long to wait, the router would rather fall
     # through to the next provider than keep an utterance waiting.
-    _RATE_LIMIT_BACKOFF = (1.0,)
-    _RATE_LIMIT_MAX_WAIT = 2.0
-    _RATE_LIMIT_MAX_RETRIES = 1
+    _RATE_LIMIT_BACKOFF = (1.5, 3.0, 6.0)
+    _RATE_LIMIT_MAX_WAIT = 30.0
+    _RATE_LIMIT_MAX_RETRIES = 3
 
     async def _chat_with_retry(self, provider, messages, max_tokens, temperature, max_rate_limit_wait):
         """
