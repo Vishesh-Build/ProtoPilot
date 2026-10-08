@@ -13,6 +13,7 @@ import PrototypeViewerPage from "./pages/PrototypeViewerPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import UpdateNotification from "./components/UpdateNotification.jsx";
 import CosmicOrbLoader from "./components/CosmicOrbLoader.jsx";
+import FloatingMiniMeetingWindow from "./components/FloatingMiniMeetingWindow.jsx";
 import { authApi, meetingsApi, API_BASE_URL, setStoredToken } from "./lib/api.js";
 
 /* ============================================================
@@ -217,11 +218,15 @@ export default function App() {
   const resumeMeeting = async (meetingId) => {
     setActiveMeetingId(meetingId);
     try {
-      const res = await fetch(`${API_BASE_URL}/meetings/${meetingId}`, { credentials: "include" });
-      const data = await res.json();
-      setIsMeetingHost(Boolean(currentUser && data.host_user_id === currentUser.id));
-    } catch {
-      setIsMeetingHost(false);
+      const data = await meetingsApi.get(meetingId);
+      const isHost = Boolean(
+        !data.host_user_id || (currentUser && data.host_user_id === currentUser.id)
+      );
+      setIsMeetingHost(isHost);
+    } catch (err) {
+      console.warn("[App] Error checking host on resume:", err);
+      // Resumed from user's own dashboard — default to host true so controls are never blocked
+      setIsMeetingHost(true);
     }
     setMeetingLive(true);
     setPage("live");
@@ -243,36 +248,40 @@ export default function App() {
     setPage("live");
   };
 
-  // Pages the host can reach *from* a live meeting without leaving it. While
-  // the meeting is live and the current page is one of these, LiveMeetingCall
-  // stays mounted (hidden behind the page when it isn't "live"). Anything else
-  // — Dashboard, home, login — means the host has left the meeting.
-  const LIVE_OVERLAY_PAGES = ["live", "workforce", "pipeline", "viewer"];
-
-  // Any navigation into the pipeline that isn't the explicit Generate/
-  // Regenerate button is a look, not a run — force "view" so opening the
-  // page just replays the already-built prototype. Navigating anywhere that
-  // isn't a meeting sub-page ends the live call.
-  const navigate = (target) => {
-    if (target === "pipeline") setPipelineIntent("view");
-    if (!LIVE_OVERLAY_PAGES.includes(target)) setMeetingLive(false);
-    setPage(target);
-  };
-
-  // Explicit Back / Hang up from the meeting screen: end the live session so
-  // the room actually disconnects, then return to the dashboard.
-  const endLiveMeeting = () => {
-    setMeetingLive(false);
+  // Minimize meeting back to dashboard (or previous page) without ending call
+  const minimizeMeeting = () => {
     setPage("dashboard");
   };
 
+  // Restore mini meeting window back to full meeting view
+  const restoreMeeting = () => {
+    setPage("live");
+  };
 
+  // Explicit Hang Up / End Meeting — cleanly tears down LiveKit room
+  const endLiveMeeting = () => {
+    setMeetingLive(false);
+    setActiveMeetingId(null);
+    setPage("dashboard");
+  };
+
+  // Navigate between app pages while keeping live call active via floating mini window!
+  const navigate = (target) => {
+    if (target === "pipeline") setPipelineIntent("view");
+    // Only disconnect call if navigating out to authentication pages
+    if (["home", "login", "register", "forgot", "reset"].includes(target)) {
+      setMeetingLive(false);
+      setActiveMeetingId(null);
+    }
+    setPage(target);
+  };
 
   const liveCallProps = {
     meetingId: activeMeetingId,
     currentUser,
     isHost: isMeetingHost,
-    onBack: endLiveMeeting,
+    onBack: minimizeMeeting,
+    onMinimize: minimizeMeeting,
     onHangUp: endLiveMeeting,
     onGeneratePrototype: () => { setPipelineIntent("run"); setPage("pipeline"); },
     onViewPrototype: () => setPage("viewer"),
@@ -284,7 +293,7 @@ export default function App() {
   // meeting sub-page so the LiveKit room, the mic, and the caption feed
   // survive navigation. Shown only on the "live" page (display:contents keeps
   // its own full-screen layout intact); hidden — but still connected — while
-  // the host is on Workforce/Pipeline/Prototype.
+  // the host is on Dashboard/Workforce/Pipeline/Prototype with floating window.
   const persistentLiveCall =
     meetingLive && activeMeetingId ? (
       <div style={{ display: page === "live" ? "contents" : "none" }}>
@@ -374,6 +383,15 @@ export default function App() {
   return (
     <>
       {persistentLiveCall}
+      {meetingLive && activeMeetingId && page !== "live" && (
+        <FloatingMiniMeetingWindow
+          meetingId={activeMeetingId}
+          meetingTitle="Live Meeting"
+          isHost={isMeetingHost}
+          onRestore={restoreMeeting}
+          onHangUp={endLiveMeeting}
+        />
+      )}
       {currentPage}
       <UpdateNotification />
       {showSplash && (

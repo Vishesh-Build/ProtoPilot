@@ -85,10 +85,12 @@ class Settings(BaseSettings):
     # auth, /chat/completions and /models all work unchanged.
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
-    # gemini-3.8-flash leads, followed by gemini-flash-latest.
+    # gemini-3.6-flash leads (stable, high quota, answers 200 not 503), followed by gemini-3.5-flash and latest.
     gemini_models: str = (
-        "gemini-3.8-flash,"
-        "gemini-flash-latest"
+        "gemini-3.6-flash,"
+        "gemini-3.5-flash,"
+        "gemini-flash-latest,"
+        "gemini-3.8-flash"
     )
 
     # ---- Router behavior ----

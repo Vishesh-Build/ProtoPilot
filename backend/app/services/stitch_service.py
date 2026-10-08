@@ -557,10 +557,10 @@ async def generate_prototype_html(context: str) -> str | None:
         return None
 
     try:
-        # Strict 10-second ceiling on external Stitch MCP call to prevent prototype generation stalls
-        return await asyncio.wait_for(_generate_prototype_html_once(context), timeout=10.0)
+        # Give Google Stitch up to 120 seconds to design and synthesize full multi-screen prototypes
+        return await asyncio.wait_for(_generate_prototype_html_once(context), timeout=120.0)
     except asyncio.TimeoutError:
-        logger.warning("Stitch MCP generation timed out (>10s) — fast failover to direct LLM prototype builder.")
+        logger.warning("Stitch MCP generation timed out (>120s) — fast failover to direct LLM prototype builder.")
         return None
     except Exception as e:  # noqa: BLE001
         logger.warning("Stitch MCP generation failed (%s) — fast failover to direct LLM prototype builder.", e)

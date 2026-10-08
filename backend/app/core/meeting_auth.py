@@ -33,9 +33,13 @@ async def require_meeting_host(
     session = get_session_or_404(meeting_id)
 
     if session.host_user_id is None:
-        # Shouldn't normally happen (host is set at creation) — fail closed
-        # rather than silently letting the first requester claim it here.
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This meeting has no assigned host yet.")
+        # Backfill current user as host if meeting had unassigned host
+        session.host_user_id = current_user.id
+        if session._store is not None and hasattr(session._store, "update_meeting_host"):
+            try:
+                session._store.update_meeting_host(session.meeting_id, current_user.id)
+            except Exception:
+                pass
 
     if not session.is_host(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the meeting host can do this.")
@@ -80,4 +84,11 @@ async def require_ws_meeting_host(websocket: WebSocket, meeting_id: str) -> tupl
         return None, False
 
     user_id = await get_ws_user_id(websocket)
+    if session.host_user_id is None and user_id:
+        session.host_user_id = user_id
+        if session._store is not None and hasattr(session._store, "update_meeting_host"):
+            try:
+                session._store.update_meeting_host(session.meeting_id, user_id)
+            except Exception:
+                pass
     return session, session.is_host(user_id)

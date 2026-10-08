@@ -112,13 +112,6 @@ def _parse_json_array(raw: str) -> list[dict]:
             raise
         parsed = json.loads(cleaned[start:end + 1])
 
-    if isinstance(parsed, dict):
-        if "title" in parsed:
-            return [parsed]
-        if "requirements" in parsed and isinstance(parsed["requirements"], list):
-            return parsed["requirements"]
-        raise ValueError("expected a JSON array or requirement object")
-
     if not isinstance(parsed, list):
         raise ValueError("expected a JSON array")
     return parsed

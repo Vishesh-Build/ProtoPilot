@@ -1633,7 +1633,7 @@ export default function LiveMeetingCall({
           {/* ---------- Top bar ---------- */}
           <div className="lmc-topbar" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div className="lmc-back-btn" onClick={onBack}>
+              <div className="lmc-back-btn" onClick={onBack} title="Minimize meeting (Keep call running in background)">
                 <ChevronLeft size={16} />
               </div>
               <div>

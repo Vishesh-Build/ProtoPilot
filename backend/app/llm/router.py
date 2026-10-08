@@ -75,8 +75,9 @@ def _mock_chat_result(messages: list[dict]) -> ChatResult:
 
 class LLMRouter:
     def __init__(self):
-        # Groq first with ultra-fast Qwen-27B (0.35s response), then NIM (0.8s), then Gemini, OpenRouter
-        self.providers = [GroqProvider(), NimProvider(), GeminiProvider(), OpenRouterProvider()]
+        # Gemini leads when configured (huge per-minute token quota prevents 429 generation freezes),
+        # followed by Groq (ultra-fast 0.35s Qwen), NIM, and OpenRouter
+        self.providers = [GeminiProvider(), GroqProvider(), NimProvider(), OpenRouterProvider()]
         self._cooldown_until: dict[str, float] = {}
 
     def _is_cooling_down(self, provider_name: str) -> bool:
@@ -91,9 +92,9 @@ class LLMRouter:
     # requirement point is worthless if it lands a minute late, so when the
     # provider does not say how long to wait, the router would rather fall
     # through to the next provider than keep an utterance waiting.
-    _RATE_LIMIT_BACKOFF = (1.5, 3.0, 6.0)
-    _RATE_LIMIT_MAX_WAIT = 30.0
-    _RATE_LIMIT_MAX_RETRIES = 3
+    _RATE_LIMIT_BACKOFF = (1.5, 3.0)
+    _RATE_LIMIT_MAX_WAIT = 20.0
+    _RATE_LIMIT_MAX_RETRIES = 2
 
     async def _chat_with_retry(self, provider, messages, max_tokens, temperature, max_rate_limit_wait):
         """
@@ -234,7 +235,6 @@ class LLMRouter:
                         )
                     except Exception:
                         pass
-                    self._cooldown_until[provider.name] = time.monotonic() + 20.0
                     errors.append(f"{provider.name}: {e.message}")
                     continue
                 if e.model_gone:
