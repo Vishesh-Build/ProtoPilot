@@ -149,8 +149,12 @@ class LLMRouter:
         total_delay = 0.0
         backoff_schedule = self._RATE_LIMIT_BACKOFF
         max_retries = self._RATE_LIMIT_MAX_RETRIES
+        tried_models: set[str] = set()
 
         while True:
+            current_model = getattr(provider, "model", None)
+            if current_model:
+                tried_models.add(current_model)
             try:
                 return await self._call_provider(
                     provider,
@@ -161,6 +165,17 @@ class LLMRouter:
                     timeout=timeout,
                 )
             except ProviderError as e:
+                is_empty_reply = "empty reply" in (e.message or "").lower()
+                rotatable = e.rate_limited or e.transient or e.model_gone or is_empty_reply
+                if rotatable and hasattr(provider, "rotate_candidate"):
+                    next_model = provider.rotate_candidate(e.model, tried=tried_models)
+                    if next_model:
+                        logger.warning(
+                            "%s: rotating model %r -> %r immediately after error (%s)",
+                            provider.name, e.model or current_model, next_model, e.message,
+                        )
+                        continue
+
                 # A 429 and a transient 5xx are the two failures worth retrying
                 # in place; everything else (dead model, network error, empty
                 # reply) is raised at once because it will not get better by
@@ -231,16 +246,12 @@ class LLMRouter:
             return _mock_chat_result(messages)
 
         errors: list[str] = []
+        skipped_cooling: list = []
+        attempted_any = False
 
-        for provider in self.providers:
-            if not provider.is_configured:
-                logger.debug("%s skipped: no API key configured", provider.name)
-                continue
-
-            if self._is_cooling_down(provider.name):
-                logger.debug("%s skipped: in cooldown", provider.name)
-                continue
-
+        async def _try_one(provider) -> ChatResult | None:
+            nonlocal attempted_any
+            attempted_any = True
             try:
                 result = await self._chat_with_retry(
                     provider,
@@ -251,6 +262,7 @@ class LLMRouter:
                     reasoning_effort=reasoning_effort,
                     timeout=timeout,
                 )
+                self._cooldown_until.pop(provider.name, None)
                 logger.info(
                     "llm call succeeded via %s model=%s (in=%s out=%s tokens)",
                     provider.name, result.model, result.input_tokens, result.output_tokens,
@@ -277,19 +289,15 @@ class LLMRouter:
                             category="LLM_QUOTA",
                             title=f"{provider.name.capitalize()} Quota / Rate Limit (429)",
                             reason=f"Provider {provider.name} exceeded requests or tokens per minute limit.",
-                            solution=f"Wait for window reset, or configure alternative provider key (e.g. GEMINI_API_KEY) in backend/.env.",
+                            solution="Wait for window reset, or configure alternative provider key (e.g. GEMINI_API_KEY) in backend/.env.",
                             severity="WARNING",
                             raw_details=e.message,
                         )
                     except Exception:
                         pass
                     errors.append(f"{provider.name}: {e.message}")
-                    continue
+                    return None
                 if e.model_gone:
-                    # The provider already tried to find a live replacement
-                    # from its own /models list and still failed, so this is
-                    # a configuration problem a human has to look at — say so
-                    # in plain language instead of burying it in a warning.
                     logger.error(
                         "%s: no usable model. Configured candidates: %s. Last error: %s. "
                         "Run `python scripts/preflight.py` to see what this provider serves today.",
@@ -299,7 +307,31 @@ class LLMRouter:
                     logger.warning("%s failed: %s", provider.name, e.message)
                 errors.append(f"{provider.name}: {e.message}")
                 self._start_cooldown(provider.name)
+                return None
+
+        for provider in self.providers:
+            if not provider.is_configured:
+                logger.debug("%s skipped: no API key configured", provider.name)
                 continue
+
+            if self._is_cooling_down(provider.name):
+                logger.debug("%s skipped: in cooldown", provider.name)
+                skipped_cooling.append(provider)
+                continue
+
+            res = await _try_one(provider)
+            if res is not None:
+                return res
+
+        # If active providers failed (e.g. Groq 429) while another configured
+        # provider (e.g. Gemini) was only skipped due to an earlier short
+        # cooldown, retry the cooled provider as a last-resort rescue.
+        if attempted_any and skipped_cooling:
+            for provider in skipped_cooling:
+                logger.warning("%s retrying as rescue fallback after active providers failed", provider.name)
+                res = await _try_one(provider)
+                if res is not None:
+                    return res
 
         if errors:
             try:

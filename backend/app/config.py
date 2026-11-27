@@ -32,12 +32,14 @@ class Settings(BaseSettings):
     # and the fast one sits directly behind it.
     nim_api_key: str | None = None
     nim_base_url: str = "https://integrate.api.nvidia.com/v1"
-    # openai/gpt-oss-20b leads because NIM's own /v1/models answered with it
-    # on 2026-09-02, while both ids below it had stopped being served — with
-    # them in front, every process start paid a 410 first.
+    # Live verified NIM chat models (checked against integrate.api.nvidia.com
+    # on 2026-11-27 — openai/gpt-oss-20b reached EOL 2026-11-18 and google/gemma-3-*
+    # returns 404 "Not found for account").
     nim_models: str = (
-        "openai/gpt-oss-20b,"
-        "meta/llama-3.2-11b-vision-instruct"
+        "minimaxai/minimax-m3.1-flash,"
+        "nvidia/nemotron-3.5-bolt-e4b,"
+        "nvidia/nemotron-3-ultra-550b-a55b,"
+        "poolside/laguna-xs-2.1"
     )
 
     openrouter_api_key: str | None = None

@@ -390,6 +390,27 @@ class OpenAICompatibleProvider:
             "Content-Type": "application/json",
         }
 
+    def rotate_candidate(self, failed_model: str | None = None, *, tried: set[str] | None = None) -> str | None:
+        """
+        Rotates self.model to another live candidate in self.candidates (e.g.
+        when one model hits 429 TPM limit or returns empty reasoning tokens
+        while another candidate on the same provider has an independent quota).
+        Returns the newly selected model id, or None if no other candidate exists.
+        """
+        excluded = set(self._dead_models)
+        if failed_model:
+            excluded.add(failed_model)
+        elif self.model:
+            excluded.add(self.model)
+        if tried:
+            excluded.update(tried)
+
+        remaining = [c for c in self.candidates if c not in excluded]
+        if not remaining:
+            return None
+        self.model = remaining[0]
+        return self.model
+
     async def chat(
         self,
         messages: list[dict],
@@ -480,8 +501,7 @@ class OpenAICompatibleProvider:
             raise ProviderError(self.name, f"network error: {detail}", model=model) from e
 
         if resp.status_code == 400 and sent_reasoning:
-            low_body = resp.text.lower()
-            if "reasoning" in low_body or "unknown" in low_body or "unsupported" in low_body or "extra inputs" in low_body:
+            if not looks_like_model_error(resp.status_code, resp.text) and not looks_like_model_capacity_error(resp.status_code, resp.text):
                 self._no_reasoning_param_models.add(model)
                 payload.pop("reasoning_effort", None)
                 try:

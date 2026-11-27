@@ -263,6 +263,76 @@ class FastRealtimeFailoverTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("reasoning_effort", seen_payloads[1])
         self.assertIn("test-model", prov._no_reasoning_param_models)
 
+    async def test_router_rotates_candidate_models_on_429_before_sleeping(self):
+        router = router_module.LLMRouter()
+        slept = []
+
+        async def rec_sleep(sec):
+            slept.append(sec)
+
+        groq = OpenAICompatibleProvider(
+            base_url="https://api.groq.com/openai/v1",
+            api_key="test-key",
+            models=["qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
+            timeout=10.0,
+        )
+        seen_models = []
+
+        async def fake_post(messages, max_tokens, temperature, **kwargs):
+            seen_models.append(groq.model)
+            if groq.model == "qwen/qwen3.8-27b":
+                raise ProviderError(
+                    "groq", "rate limited (429), retry-after=12s",
+                    model=groq.model, rate_limited=True, retry_after=12.0,
+                )
+            return ChatResult(text="arch spec ok", provider="groq", model=groq.model)
+
+        groq._post_chat = fake_post
+        router.providers = [groq]
+
+        with mock.patch.object(router_module.asyncio, "sleep", rec_sleep):
+            res = await router.chat([{"role": "user", "content": "hi"}], max_rate_limit_wait=35.0)
+
+        self.assertEqual(res.model, "openai/gpt-oss-20b")
+        self.assertEqual(seen_models, ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"])
+        self.assertEqual(slept, [], "rotating to second model avoids 12s Retry-After sleep")
+
+    async def test_router_rescues_using_cooled_provider_when_active_ones_fail(self):
+        router = router_module.LLMRouter()
+
+        class _CooledLead:
+            name = "gemini"
+            is_configured = True
+            candidates = ["gemini-3.6-flash"]
+
+            async def chat(self, messages, max_tokens, temperature, **kwargs):
+                return ChatResult(text="rescued", provider="gemini", model="gemini-3.6-flash")
+
+        class _FailingSecond:
+            name = "groq"
+            is_configured = True
+            candidates = ["m-1"]
+
+            async def chat(self, messages, max_tokens, temperature, **kwargs):
+                raise ProviderError("groq", "rate limited (429)", model="m-1", rate_limited=True, retry_after=99.0)
+
+        router.providers = [_CooledLead(), _FailingSecond()]
+        router._start_cooldown("gemini")
+
+        res = await router.chat([{"role": "user", "content": "hi"}], max_rate_limit_wait=5.0)
+        self.assertEqual(res.provider, "gemini")
+        self.assertEqual(res.text, "rescued")
+        self.assertFalse(router._is_cooling_down("gemini"))
+
+    def test_nim_default_candidates_exclude_eol_and_account_404_models(self):
+        from app.llm.providers.nim import NimProvider
+
+        nim = NimProvider()
+        self.assertNotIn("openai/gpt-oss-20b", nim.candidates)
+        self.assertNotIn("meta/llama-3.2-11b-vision-instruct", nim.candidates)
+        self.assertNotIn("google/gemma-3-12b-it", nim.candidates)
+        self.assertTrue(any("nemotron" in c or "minimax" in c for c in nim.candidates))
+
 
 class SecurityAndStitchSandboxTest(unittest.IsolatedAsyncioTestCase):
     async def test_non_admitted_user_blocked_by_participant_guard(self):
