@@ -7,7 +7,17 @@ import {
   Maximize2, Minimize2, Share2, Send, FileCode, CheckCircle2,
 } from "lucide-react";
 import bgImage from "./assets/hero-bg.jpg";
-import { meetingsApi } from "../lib/api.js";
+import { getStoredToken, meetingsApi } from "../lib/api.js";
+
+function isIncompletePrototypeHtml(html) {
+  if (!html || typeof html !== "string") return true;
+  const low = html.toLowerCase();
+  if (!low.includes("<body") || !low.includes("</body>")) return true;
+  const openStyle = (low.match(/<style\b/g) || []).length;
+  const closeStyle = (low.match(/<\/style>/g) || []).length;
+  if (openStyle > closeStyle) return true;
+  return false;
+}
 
 /* ============================================================
    ProtoPilot — Prototype Viewer
@@ -460,6 +470,9 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
         const outputs = data.agent_outputs || {};
         if (outputs.prototype) {
           setPrototypeHtml(outputs.prototype);
+          if (isIncompletePrototypeHtml(outputs.prototype)) {
+            setTweakError("Rendered HTML looks incomplete/truncated — click Regenerate in Generation Pipeline to rebuild a full interactive prototype.");
+          }
           setStatus("ready");
         } else if (outputs.ui) {
           setUiPlan(outputs.ui);
@@ -501,7 +514,9 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
     if (!meetingId) return;
     setDownloading(true);
     try {
-      const res = await fetch(meetingsApi.exportUrl(meetingId), { credentials: "include" });
+      const token = getStoredToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(meetingsApi.exportUrl(meetingId), { credentials: "include", headers });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

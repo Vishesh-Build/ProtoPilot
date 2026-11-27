@@ -101,23 +101,29 @@ class Settings(BaseSettings):
     # outside. This is a ceiling and not a spend, so the headroom is free.
     llm_default_max_tokens: int = 2048
     llm_default_temperature: float = 0.3
-    llm_request_timeout_seconds: float = 120.0
+    llm_request_timeout_seconds: float = 55.0
+    llm_realtime_timeout_seconds: float = 15.0
     provider_cooldown_seconds: float = 10.0
     llm_mock_mode: bool = False
 
+    # Live meeting path (Points extraction & caption translation) must fail over
+    # almost immediately rather than freezing transcript/points behind a slow
+    # Retry-After on one throttled provider.
+    llm_realtime_max_rate_limit_wait: float = 2.0
+
     # How long the router may honor a provider's Retry-After during the
-    # GENERATION pipeline, in seconds. Set to 60.0s so honest rate-limit pauses
-    # (e.g. Groq 30s) are safely waited out rather than crashing the pipeline.
-    llm_generation_max_rate_limit_wait: float = 60.0
+    # GENERATION pipeline, in seconds.
+    llm_generation_max_rate_limit_wait: float = 35.0
 
     # Strict 1 concurrency so free tier API keys (NIM, Groq) never receive
     # simultaneous requests which cause 429s or server-side read timeouts.
     llm_generation_concurrency: int = 1
 
     # ---- Stitch (AI UI design tool) ----
-    # Disabled by default so generation finishes in <30 seconds via fast LLM.
+    # Disabled by default so generation finishes quickly via fast LLM.
     # Set STITCH_ENABLED=true in backend/.env only if you want Google Stitch MCP.
     stitch_enabled: bool = False
+    stitch_timeout_seconds: float = 45.0
     stitch_api_key: str | None = None
     # Optional: pin generation to one existing Stitch project id instead of
     # auto-creating/caching one on first use.

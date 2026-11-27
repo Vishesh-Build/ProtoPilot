@@ -1113,10 +1113,13 @@ export default function LiveMeetingCall({
               : prev,
           );
         } else if (data.type === "requirements" && Array.isArray(data.new)) {
-          setPoints((prev) => [
-            ...prev,
-            ...data.new.map((r) => ({ id: r.id, text: r.title, status: r.status, priority: r.priority || "Medium" })),
-          ]);
+          setPoints((prev) => {
+            const seenIds = new Set(prev.map((p) => p.id));
+            const additions = data.new
+              .filter((r) => !seenIds.has(r.id))
+              .map((r) => ({ id: r.id, text: r.title, status: r.status, priority: r.priority || "Medium" }));
+            return additions.length ? [...prev, ...additions] : prev;
+          });
         } else if (data.type === "knock" && isHost && data.request) {
           setPendingKnocks((prev) => {
             if (prev.some((k) => k.user_id === data.request.user_id)) return prev;

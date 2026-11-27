@@ -63,6 +63,11 @@ async def meeting_socket(websocket: WebSocket, meeting_id: str):
         await websocket.close(code=4404)
         return
 
+    if not session.is_user_admitted(user_id):
+        await websocket.send_json({"type": "error", "message": "Waiting for host approval before joining transcript feed."})
+        await websocket.close(code=4403)
+        return
+
     await meeting_connections.connect(meeting_id, websocket)
     logger.info("meeting %s: client connected to transcript feed (user=%s)", meeting_id, user_id)
 

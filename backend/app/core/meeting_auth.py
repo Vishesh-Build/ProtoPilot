@@ -47,6 +47,24 @@ async def require_meeting_host(
     return session
 
 
+async def require_meeting_participant(
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+) -> MeetingSession:
+    """
+    Loads the meeting and confirms the user is either the host or an
+    explicitly admitted participant — prevents outsiders who merely know a
+    meeting_id from reading private transcripts, requirements, or outputs.
+    """
+    session = get_session_or_404(meeting_id)
+    if not session.is_user_admitted(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be admitted to this meeting to access its workspace.",
+        )
+    return session
+
+
 async def get_ws_user_id(websocket: WebSocket) -> str | None:
     """
     Resolves the access-token from cookies, query parameters (?token=),

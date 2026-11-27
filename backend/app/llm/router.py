@@ -39,6 +39,7 @@ Design goals (per project decision):
 """
 
 import asyncio
+import inspect
 import logging
 import time
 
@@ -96,7 +97,39 @@ class LLMRouter:
     _RATE_LIMIT_MAX_WAIT = 20.0
     _RATE_LIMIT_MAX_RETRIES = 2
 
-    async def _chat_with_retry(self, provider, messages, max_tokens, temperature, max_rate_limit_wait):
+    async def _call_provider(
+        self,
+        provider,
+        messages: list[dict],
+        max_tokens: int,
+        temperature: float,
+        *,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
+    ) -> ChatResult:
+        kwargs: dict = {}
+        try:
+            params = inspect.signature(provider.chat).parameters
+        except (TypeError, ValueError):
+            params = {}
+        has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if reasoning_effort is not None and ("reasoning_effort" in params or has_varkw):
+            kwargs["reasoning_effort"] = reasoning_effort
+        if timeout is not None and ("timeout" in params or has_varkw):
+            kwargs["timeout"] = timeout
+        return await provider.chat(messages, max_tokens, temperature, **kwargs)
+
+    async def _chat_with_retry(
+        self,
+        provider,
+        messages,
+        max_tokens,
+        temperature,
+        max_rate_limit_wait,
+        *,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
+    ):
         """
         One provider, retried in place only for the two transient failures:
         HTTP 429 (asked to slow down) and an HTTP 5xx overload (up but
@@ -119,7 +152,14 @@ class LLMRouter:
 
         while True:
             try:
-                return await provider.chat(messages, max_tokens, temperature)
+                return await self._call_provider(
+                    provider,
+                    messages,
+                    max_tokens,
+                    temperature,
+                    reasoning_effort=reasoning_effort,
+                    timeout=timeout,
+                )
             except ProviderError as e:
                 # A 429 and a transient 5xx are the two failures worth retrying
                 # in place; everything else (dead model, network error, empty
@@ -168,6 +208,8 @@ class LLMRouter:
         max_tokens: int | None = None,
         temperature: float | None = None,
         max_rate_limit_wait: float | None = None,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
     ) -> ChatResult:
         """
         Try each provider in order. Returns the first successful result.
@@ -201,7 +243,13 @@ class LLMRouter:
 
             try:
                 result = await self._chat_with_retry(
-                    provider, messages, max_tokens, temperature, max_rate_limit_wait,
+                    provider,
+                    messages,
+                    max_tokens,
+                    temperature,
+                    max_rate_limit_wait,
+                    reasoning_effort=reasoning_effort,
+                    timeout=timeout,
                 )
                 logger.info(
                     "llm call succeeded via %s model=%s (in=%s out=%s tokens)",

@@ -106,6 +106,7 @@ class ChatResult:
     model: str
     input_tokens: int | None = None
     output_tokens: int | None = None
+    finish_reason: str | None = None
 
 
 # 404 = "no such model" (Groq, OpenRouter), 410 = "model reached end of
@@ -373,6 +374,8 @@ class OpenAICompatibleProvider:
         # Model ids this provider has already answered "gone" for. Without
         # it, rediscovery could hand back the same dead id in a loop.
         self._dead_models: set[str] = set()
+        # Model ids whose OpenAI-compat gateway rejected `reasoning_effort` (HTTP 400).
+        self._no_reasoning_param_models: set[str] = set()
         # Serialises rediscovery: nine agents call chat() at once, and they
         # must not all independently GET /models over the same failure.
         self._rediscovery_lock = asyncio.Lock()
@@ -392,14 +395,24 @@ class OpenAICompatibleProvider:
         messages: list[dict],
         max_tokens: int,
         temperature: float,
+        *,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
     ) -> ChatResult:
         if not self.is_configured:
             raise ProviderError(self.name, "no API key configured")
         if not self.model:
             raise ProviderError(self.name, "no model id configured")
 
+        async def _invoke():
+            if reasoning_effort is None and timeout is None:
+                return await self._post_chat(messages, max_tokens, temperature)
+            return await self._post_chat(
+                messages, max_tokens, temperature, reasoning_effort=reasoning_effort, timeout=timeout,
+            )
+
         try:
-            return await self._post_chat(messages, max_tokens, temperature)
+            return await _invoke()
         except ProviderError as first_error:
             if first_error.model_capacity_exceeded:
                 failed_model = first_error.model or self.model
@@ -412,7 +425,7 @@ class OpenAICompatibleProvider:
                         "%s: model %r hit capacity/TPM limit (%s) — retrying with candidate %r",
                         self.name, failed_model, first_error.message, replacement,
                     )
-                    return await self._post_chat(messages, max_tokens, temperature)
+                    return await _invoke()
 
             if not first_error.model_gone:
                 raise
@@ -429,13 +442,16 @@ class OpenAICompatibleProvider:
             )
             # Exactly one retry. If the replacement is rejected too, the
             # error propagates and the router moves to the next provider.
-            return await self._post_chat(messages, max_tokens, temperature)
+            return await _invoke()
 
     async def _post_chat(
         self,
         messages: list[dict],
         max_tokens: int,
         temperature: float,
+        *,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
     ) -> ChatResult:
         url = f"{self.base_url}/chat/completions"
         # Read once: self.model can change mid-request when another coroutine
@@ -448,9 +464,13 @@ class OpenAICompatibleProvider:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        sent_reasoning = bool(reasoning_effort and model not in self._no_reasoning_param_models)
+        if sent_reasoning:
+            payload["reasoning_effort"] = reasoning_effort
 
+        effective_timeout = timeout if timeout is not None else self.timeout
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=effective_timeout) as client:
                 resp = await client.post(url, headers=self._headers(), json=payload)
         except httpx.RequestError as e:
             # string(e) is empty for a timeout — the log ended with
@@ -458,6 +478,18 @@ class OpenAICompatibleProvider:
             # broken" when it really means "this one call waited too long".
             detail = e.__class__.__name__ + (f": {e}" if str(e).strip() else "")
             raise ProviderError(self.name, f"network error: {detail}", model=model) from e
+
+        if resp.status_code == 400 and sent_reasoning:
+            low_body = resp.text.lower()
+            if "reasoning" in low_body or "unknown" in low_body or "unsupported" in low_body or "extra inputs" in low_body:
+                self._no_reasoning_param_models.add(model)
+                payload.pop("reasoning_effort", None)
+                try:
+                    async with httpx.AsyncClient(timeout=effective_timeout) as client:
+                        resp = await client.post(url, headers=self._headers(), json=payload)
+                except httpx.RequestError as e:
+                    detail = e.__class__.__name__ + (f": {e}" if str(e).strip() else "")
+                    raise ProviderError(self.name, f"network error: {detail}", model=model) from e
 
         if resp.status_code == 429:
             # Surface the provider's own Retry-After when it sends one, so the
@@ -498,6 +530,8 @@ class OpenAICompatibleProvider:
                 self.name, f"empty reply from model {model!r}: {problem}", model=model,
             )
 
+        choices = data.get("choices") or []
+        finish_reason = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
         usage = data.get("usage")
         usage = usage if isinstance(usage, dict) else {}
         return ChatResult(
@@ -506,6 +540,7 @@ class OpenAICompatibleProvider:
             model=model,
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
+            finish_reason=finish_reason,
         )
 
     async def list_models(self) -> list[str]:

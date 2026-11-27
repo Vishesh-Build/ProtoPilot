@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.deps import get_current_user
-from app.core.meeting_auth import get_session_or_404, require_meeting_host
+from app.core.meeting_auth import get_session_or_404, require_meeting_host, require_meeting_participant
 from app.db.models import User
 from app.meetings.session import MeetingSession, session_registry
 
@@ -53,14 +53,12 @@ async def get_meeting(meeting_id: str, current_user: User = Depends(get_current_
 
 
 @router.get("/{meeting_id}/agent-outputs")
-async def get_agent_outputs(meeting_id: str, current_user: User = Depends(get_current_user)):
-    session = get_session_or_404(meeting_id)
+async def get_agent_outputs(session: MeetingSession = Depends(require_meeting_participant)):
     return {"agent_outputs": session.agent_outputs}
 
 
 @router.get("/{meeting_id}/transcript")
-async def get_transcript(meeting_id: str, current_user: User = Depends(get_current_user)):
-    session = get_session_or_404(meeting_id)
+async def get_transcript(session: MeetingSession = Depends(require_meeting_participant)):
     # to_dict() carries id + spoken_at, so a client reloading mid-meeting can
     # match up with the lines it already received over the WebSocket.
     return {"transcript": [line.to_dict() for line in session.transcript]}
@@ -109,9 +107,8 @@ async def cancel_meeting_generation(session: MeetingSession = Depends(require_me
 
 
 @router.get("/{meeting_id}/generation-status")
-async def get_generation_status(meeting_id: str, current_user: User = Depends(get_current_user)):
+async def get_generation_status(session: MeetingSession = Depends(require_meeting_participant)):
     """Returns whether generation is currently running and overall progress."""
-    session = get_session_or_404(meeting_id)
     from app.ws.generate import get_pipeline_status
     status = get_pipeline_status(session.meeting_id)
     has_prototype = bool(session.agent_outputs.get("prototype"))
@@ -191,9 +188,8 @@ async def reject_join_request(target_user_id: str, session: MeetingSession = Dep
 from fastapi.responses import PlainTextResponse
 
 @router.get("/{meeting_id}/export-transcript", response_class=PlainTextResponse)
-async def export_meeting_transcript(meeting_id: str, current_user: User = Depends(get_current_user)):
+async def export_meeting_transcript(session: MeetingSession = Depends(require_meeting_participant)):
     """Exports full meeting transcript and extracted requirements as a clean Markdown document."""
-    session = get_session_or_404(meeting_id)
 
     lines = [
         f"# Meeting Transcript: {session.name}",
@@ -257,22 +253,21 @@ class TweakPrototypeRequest(BaseModel):
 
 @router.post("/{meeting_id}/tweak-prototype")
 async def tweak_prototype(
-    meeting_id: str,
     body: TweakPrototypeRequest,
-    current_user: User = Depends(get_current_user),
+    session: MeetingSession = Depends(require_meeting_host),
 ):
     """
     AI Quick-Tweak: Iteratively refines the existing prototype HTML using a prompt
-    (e.g., 'Switch theme to dark mode', 'Add pricing comparison table').
+    (e.g., 'Switch theme to dark mode', 'Add pricing comparison table'). Host only.
     """
+    from app.agents.orchestrator import validate_prototype_html
     from app.llm.router import llm_router
 
     prompt_text = body.prompt.strip()
     if not prompt_text:
         raise HTTPException(status_code=400, detail="Tweak prompt cannot be empty.")
 
-    session = session_registry.get(meeting_id)
-    current_html = session.agent_outputs.get("prototype") if session else None
+    current_html = session.agent_outputs.get("prototype")
 
     if not current_html:
         raise HTTPException(
@@ -282,7 +277,7 @@ async def tweak_prototype(
 
     system_prompt = (
         "You are an expert Senior Frontend UX Engineer and rapid prototyping master. "
-        "You are given an existing single-file interactive HTML prototype (which includes inline CSS/Tailwind CDN and interactive JS). "
+        "You are given an existing single-file interactive HTML prototype (which includes inline CSS and interactive JS). "
         "The user wants to make a specific modification or addition to this prototype: "
         f"\"{prompt_text}\". "
         "Apply the requested change directly into the prototype HTML, carefully preserving all other existing styling, features, and interactivity. "
@@ -298,7 +293,7 @@ async def tweak_prototype(
     ]
 
     try:
-        result = await llm_router.chat(messages, max_tokens=8192)
+        result = await llm_router.chat(messages, max_tokens=8192, reasoning_effort="low")
         raw_output = result.text.strip()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI refinement failed: {str(e)}")
@@ -316,16 +311,22 @@ async def tweak_prototype(
     from app.services.stitch_service import sanitize_prototype_html
     cleaned_html = sanitize_prototype_html(cleaned_html)
 
-    if session:
-        session.agent_outputs["prototype"] = cleaned_html
-        session.replace_agent_outputs(session.agent_outputs)
+    valid_ok, invalid_reason = validate_prototype_html(cleaned_html, finish_reason=result.finish_reason)
+    if not valid_ok:
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI refinement returned incomplete HTML ({invalid_reason}); original prototype was preserved.",
+        )
 
-        # Broadcast update to all live meeting participants
-        from app.core.connection_manager import meeting_connections
-        await meeting_connections.broadcast(session.meeting_id, {
-            "type": "prototype_tweaked",
-            "prototype": cleaned_html,
-        })
+    session.agent_outputs["prototype"] = cleaned_html
+    session.replace_agent_outputs(session.agent_outputs)
+
+    # Broadcast update to all live meeting participants
+    from app.core.connection_manager import meeting_connections
+    await meeting_connections.broadcast(session.meeting_id, {
+        "type": "prototype_tweaked",
+        "prototype": cleaned_html,
+    })
 
     return {"prototype": cleaned_html, "status": "success"}
 

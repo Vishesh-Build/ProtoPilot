@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.admin import require_admin
 from app.llm.router import llm_router
 from app.schemas.llm import ChatRequest, ChatResponse
 
@@ -7,7 +8,7 @@ router = APIRouter(prefix="/llm", tags=["llm"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, _admin=Depends(require_admin)):
     """
     Manual test endpoint for the LLM router.
 

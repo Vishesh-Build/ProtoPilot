@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core.deps import get_current_user
-from app.core.meeting_auth import get_session_or_404, require_meeting_host
-from app.db.models import User
+from app.core.meeting_auth import require_meeting_host, require_meeting_participant
 from app.meetings.session import MeetingSession
 
 router = APIRouter(prefix="/meetings", tags=["requirements"])
@@ -24,8 +22,7 @@ class RequirementCreate(BaseModel):
 
 
 @router.get("/{meeting_id}/requirements")
-async def list_requirements(meeting_id: str, current_user: User = Depends(get_current_user)):
-    session = get_session_or_404(meeting_id)
+async def list_requirements(session: MeetingSession = Depends(require_meeting_participant)):
     return {
         "requirements": [r.__dict__ for r in session.requirements],
         "readiness_percent": session.readiness_percent(),

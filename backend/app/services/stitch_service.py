@@ -390,10 +390,18 @@ def _build_screen_nav_script(nav_tokens: list[list[str]], current_index: int) ->
     if (!text || text.length > 60) return;  // a long blob isn't a nav label
     var idx = matchScreen(text);
     if (idx < 0 || idx === NAV.current) return;  // no match, or already here
-    if (window.parent && window.parent.ppShowScreen) {
+    if (window.parent) {
       e.preventDefault();
       e.stopImmediatePropagation();  // beat the "#" link and the safety-net ping
-      window.parent.ppShowScreen(idx);
+      try {
+        if (window.parent.ppShowScreen) {
+          window.parent.ppShowScreen(idx);
+          return;
+        }
+      } catch (_err) {
+        // Inside nested sandboxed srcdoc frames, fall through to postMessage.
+      }
+      window.parent.postMessage({ type: 'pp-show-screen', idx: idx }, '*');
     }
   }, true);
 })();
@@ -536,6 +544,11 @@ function ppShowScreen(idx) {{
   }});
   document.getElementById('pp-switcher').classList.remove('pp-open');
 }}
+window.addEventListener('message', function (e) {{
+  if (e && e.data && e.data.type === 'pp-show-screen' && typeof e.data.idx === 'number') {{
+    ppShowScreen(e.data.idx);
+  }}
+}});
 ppShowScreen(0);
 </script>
 </body>
@@ -557,10 +570,16 @@ async def generate_prototype_html(context: str) -> str | None:
         return None
 
     try:
-        # Give Google Stitch up to 120 seconds to design and synthesize full multi-screen prototypes
-        return await asyncio.wait_for(_generate_prototype_html_once(context), timeout=120.0)
+        # Enforce bounded wait on Stitch MCP so it fails over rapidly if hung
+        return await asyncio.wait_for(
+            _generate_prototype_html_once(context),
+            timeout=settings.stitch_timeout_seconds,
+        )
     except asyncio.TimeoutError:
-        logger.warning("Stitch MCP generation timed out (>120s) — fast failover to direct LLM prototype builder.")
+        logger.warning(
+            "Stitch MCP generation timed out (>%gs) — fast failover to direct LLM prototype builder.",
+            settings.stitch_timeout_seconds,
+        )
         return None
     except Exception as e:  # noqa: BLE001
         logger.warning("Stitch MCP generation failed (%s) — fast failover to direct LLM prototype builder.", e)

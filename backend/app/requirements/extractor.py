@@ -169,6 +169,9 @@ async def extract_new_requirements(session: MeetingSession) -> list[dict]:
                 # HTTP 200 behind it. One knob, tunable from .env.
                 max_tokens=settings.llm_default_max_tokens,
                 temperature=0.2,
+                max_rate_limit_wait=settings.llm_realtime_max_rate_limit_wait,
+                reasoning_effort="low",
+                timeout=settings.llm_realtime_timeout_seconds,
             )
             items = _parse_json_array(result.text)
         except (RuntimeError, json.JSONDecodeError, ValueError) as e:

@@ -96,39 +96,39 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         ),
     ),
     "prototype": AgentDefinition(
-        id="prototype", name="Prototype Builder", depends_on=["ui"], max_tokens=3500,
+        id="prototype", name="Prototype Builder", depends_on=["ui"], max_tokens=8192,
         system_prompt=(
             "You are the Prototype Builder agent. Generate ONE complete, self-contained, interactive HTML file "
             "that is an award-winning, pixel-perfect, premium executive-level client prototype matching the requirements.\n\n"
             "OUTPUT RULES (strict):\n"
-            "1. Output ONLY raw HTML starting with <!DOCTYPE html> — no markdown code fences (no ``` anywhere), no explanation before or after.\n"
-            "2. Single file: inline <style> for CSS, inline <script> for vanilla JS. No external files, no CDN links, no imports, no frameworks.\n"
-            "3. Use JS to fake navigation between 2-4 key screens (show/hide sections) and fake form submissions with sample data — there is no real backend.\n"
-            "4. EVERY interactive element must visibly do something when clicked — no dead buttons. Nav items switch views, action buttons open interactive modal forms, table actions toggle or delete rows, and submit buttons add new records live with toast notifications.\n"
+            "1. Output ONLY raw HTML starting with <!DOCTYPE html> and ending cleanly with </body></html> — no markdown code fences (no ``` anywhere), no explanation before or after.\n"
+            "2. Single file: keep <style> compact and crisp (~60-90 lines using CSS variables & utility classes) so the FULL <body> interactive screens, charts, tables, modals, and <script> ALWAYS fit completely inside one response without truncating!\n"
+            "3. No external files, no CDN links, no imports, no frameworks — pure inline <style> + semantic HTML + inline vanilla <script>.\n"
+            "4. Use JS to switch between 2-4 key screens (show/hide views), toggle settings (e.g. dark/light theme if requested), live-filter rows, toggle/delete statuses, and open/submit interactive modal forms with sample data.\n"
             "5. Never use localStorage, sessionStorage, indexedDB, cookies, fetch, or XMLHttpRequest (sandboxed iframe with opaque origin). Hold all state in plain JavaScript variables.\n\n"
             "STRICT ANTI-SKELETON & HIGH-FIDELITY DATA RULES:\n"
-            "- NEVER OUTPUT SKELETON LOADERS: Absolutely NO grey skeleton bars, no empty placeholder boxes, no shimmer rectangles. Fill every list and table with rich, realistic rows (names, destinations, timestamps, colored status badges like 'En Route', 'Delivered', 'Scheduled').\n"
-            "- NEVER OUTPUT EMPTY DASHES OR PLACEHOLDERS: NEVER write '-' or '...' for stat values. Every stat card MUST feature bold, realistic metrics (e.g. '1,420 Active Trips', '98.6% On-Time Delivery', '42 Available Drivers') with colored trend pills ('↑ +14.2% this week').\n"
-            "- REAL INLINE SVG CHARTS: Any chart section MUST contain an actual rendered inline SVG chart (e.g. <svg viewBox='0 0 500 180'> with <defs><linearGradient>...</linearGradient></defs>, smooth curved <path> or <polyline>, gradient area fill, and axis labels). Never leave charts empty or as a placeholder box!\n"
+            "- NEVER OUTPUT SKELETON LOADERS: Absolutely NO grey skeleton bars, no empty placeholder boxes, no shimmer rectangles. Fill every list and table with rich, realistic domain rows and colored status badges.\n"
+            "- NEVER OUTPUT EMPTY DASHES OR PLACEHOLDERS: NEVER write '-' or '...' for stat values. Every stat card MUST feature bold, realistic domain metrics with colored trend pills.\n"
+            "- REAL INLINE SVG CHARTS: Any chart section MUST contain an actual rendered inline SVG chart (<svg viewBox='0 0 500 180'> with gradient fill, curved path/polyline, and labels).\n"
             "- ZERO DEVELOPER JARGON: NEVER display database schema names (no 'RELATIONAL SCHEMA:', no table names), no SQL, no REST endpoint paths (no 'POST /...', no '/api/v1/...'), no debug toasts.\n\n"
             "DESIGN SPEC (Modern Award-Winning SaaS UI):\n"
-            "- Surfaces: deep premium dark theme (background #080c14, card surfaces #0f172a / #131c31, crisp 1px borders rgba(255,255,255,0.08), soft drop shadows).\n"
-            "- Accents: vibrant emerald green (#00E6A8) and electric indigo (#6366F1), pill badges with 15% opacity backgrounds and matching colored borders.\n"
-            "- Typography: crisp modern typography with bold headings, generous whitespace, and readable body text.\n"
+            "- Default surfaces: deep premium dark theme (background #080c14, card surfaces #0f172a / #131c31, crisp 1px borders rgba(255,255,255,0.08)), OR honor light-mode if requirements explicitly ask for light theme, plus interactive theme switch in Settings if mentioned.\n"
+            "- Accents: vibrant emerald green (#00E6A8) and electric indigo (#6366F1), crisp spacing, and readable typography.\n"
             "- Interactive modals & search: include working search inputs that live-filter table rows and '+ New' action buttons that open interactive modal forms."
         ),
     ),
 }
 
 # Execution order as "waves" — everything in one wave can run concurrently,
-# waves run one after another.
+# waves run one after another. `prototype` depends only on `ui`, so starting
+# it right after `{ui, backend}` avoids making the user wait for qa+devops first.
 EXECUTION_WAVES: list[list[str]] = [
     ["pm"],
     ["architect"],
     ["database"],
     ["api"],
     ["ui", "backend"],
+    ["prototype"],
     ["qa"],
     ["devops"],
-    ["prototype"],
 ]

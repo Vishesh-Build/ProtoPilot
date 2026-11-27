@@ -13,6 +13,7 @@ approach of asking a small LLM to hand-write the HTML directly.
 """
 
 import asyncio
+import inspect
 import logging
 import re
 from typing import Awaitable, Callable
@@ -366,19 +367,15 @@ async def run_pipeline(
                 # One provider call at a time across the whole pipeline — see
                 # llm_gate above.
                 async with llm_gate:
-                    result = await llm_router.chat(
+                    result = await _call_router_chat(
                         messages=[
                             {"role": "system", "content": definition.system_prompt},
                             {"role": "user", "content": context},
                         ],
                         max_tokens=definition.max_tokens,
                         temperature=0.3,
-                        # Generation is expected to take a minute or two, so it
-                        # is worth waiting out a provider's honest Retry-After
-                        # (Groq's live 429s asked ~24s) rather than failing this
-                        # agent and cascading every agent that depends on it.
-                        # The caption path keeps its short default ceiling.
                         max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
+                        reasoning_effort="low",
                     )
                 state.output = result.text.strip()
 
@@ -392,33 +389,35 @@ async def run_pipeline(
                 "output": state.output,
             })
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "agent %s encountered an issue (%s), activating high-quality deterministic fallback specification",
-                agent_id,
-                e,
-            )
-            try:
-                if agent_id == "prototype":
+            if agent_id == "prototype":
+                logger.warning(
+                    "agent %s encountered an issue (%s), synthesizing domain prototype fallback",
+                    agent_id,
+                    e,
+                )
+                try:
                     fallback_out = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
-                else:
-                    fallback_out = _build_agent_fallback_output(agent_id, states, requirements_block)
-                state.output = fallback_out.strip()
-                state.status = AgentStatus.COMPLETED
-                state.progress = 100
-                state.logs.append("Completed via high-fidelity synthesis.")
-                await emit({"type": "agent_update", **state.to_event_dict()})
-                await emit({
-                    "type": "agent_output",
-                    "agent": agent_id,
-                    "output": state.output,
-                })
-            except Exception as recovery_err:
-                logger.exception("agent %s fallback recovery failed: %s", agent_id, recovery_err)
-                state.status = AgentStatus.FAILED
-                state.progress = 0
-                state.logs.append(f"Failed: {recovery_err}")
-                await emit({"type": "agent_update", **state.to_event_dict()})
-                await emit({"type": "agent_log", "agent": agent_id, "message": state.logs[-1]})
+                    state.output = stitch_service.sanitize_prototype_html(fallback_out).strip()
+                    state.status = AgentStatus.COMPLETED
+                    state.progress = 100
+                    state.logs.append("Completed via domain prototype synthesis.")
+                    await emit({"type": "agent_update", **state.to_event_dict()})
+                    await emit({
+                        "type": "agent_output",
+                        "agent": agent_id,
+                        "output": state.output,
+                    })
+                    return
+                except Exception as recovery_err:
+                    logger.exception("agent %s fallback recovery failed: %s", agent_id, recovery_err)
+                    e = recovery_err
+
+            logger.error("agent %s failed: %s", agent_id, e)
+            state.status = AgentStatus.FAILED
+            state.progress = 0
+            state.logs.append(f"Failed: {e}")
+            await emit({"type": "agent_update", **state.to_event_dict()})
+            await emit({"type": "agent_log", "agent": agent_id, "message": state.logs[-1]})
 
     async def run_wave(wave):
         """
@@ -460,12 +459,77 @@ async def run_pipeline(
     return states
 
 
+async def _call_router_chat(
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+    max_rate_limit_wait: float,
+    reasoning_effort: str | None = None,
+):
+    """
+    Calls llm_router.chat while gracefully omitting optional parameters when
+    a lightweight unit-test stub does not accept them.
+    """
+    kwargs: dict = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "max_rate_limit_wait": max_rate_limit_wait,
+    }
+    try:
+        params = inspect.signature(llm_router.chat).parameters
+    except (TypeError, ValueError):
+        params = {}
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    if reasoning_effort is not None and ("reasoning_effort" in params or has_varkw):
+        kwargs["reasoning_effort"] = reasoning_effort
+    return await llm_router.chat(**kwargs)
+
+
+def validate_prototype_html(html: str, finish_reason: str | None = None) -> tuple[bool, str]:
+    """
+    Verifies generated prototype HTML is structurally complete and will render
+    visible DOM content rather than an empty/solid-black page caused by
+    mid-output token truncation (e.g. unclosed <style> with missing <body>).
+    """
+    if not html or len(html.strip()) < 900:
+        return False, "prototype HTML too short or empty"
+
+    low = html.lower()
+    open_style = low.count("<style")
+    close_style = low.count("</style>")
+    if open_style > close_style:
+        return False, "truncated inside <style> block (missing </style>)"
+
+    open_script = low.count("<script")
+    close_script = low.count("</script>")
+    if open_script > close_script:
+        return False, "truncated inside <script> block (missing </script>)"
+
+    if "<body" not in low or "</body>" not in low:
+        return False, "incomplete HTML (missing <body> or </body>)"
+
+    if finish_reason == "length" and "</html>" not in low:
+        return False, "model hit max_tokens before closing </html>"
+
+    body_match = re.search(r"<body\b[^>]*>(.*?)</body>", html, flags=re.IGNORECASE | re.DOTALL)
+    body_inner = body_match.group(1) if body_match else ""
+    body_no_assets = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", body_inner, flags=re.IGNORECASE | re.DOTALL)
+    visible_text = re.sub(r"<[^>]+>", " ", body_no_assets)
+    visible_text = re.sub(r"\s+", " ", visible_text).strip()
+    if len(visible_text) < 80:
+        return False, "prototype <body> has insufficient visible UI content"
+
+    return True, ""
+
+
 def _is_low_quality_skeleton_prototype(html: str) -> bool:
     """
     Detects if the LLM generated a lazy wireframe with skeleton placeholders,
-    empty metric dashes, or missing SVG charts instead of a rich client prototype.
+    empty metric dashes, missing SVG charts, or truncated HTML instead of a rich client prototype.
     """
-    if not html or len(html) < 1800:
+    ok, _reason = validate_prototype_html(html)
+    if not ok:
         return True
     # Empty metric dashes like >- < or >-< or > - <
     if len(re.findall(r'>\s*-\s*<', html)) >= 2:
@@ -490,58 +554,88 @@ async def _run_prototype_agent(
     requirements_block: str = "",
 ) -> str:
     """
-    Tries Stitch first (real design tool, proper UI). Falls back to the
-    original small-LLM raw-HTML generation if Stitch isn't configured or
-    the call fails. If the LLM generates empty skeletons, rate limits, or times out,
-    gracefully synthesizes an award-winning client prototype matching executive
-    design specifications so the pipeline NEVER crashes or looks incomplete.
+    Tries Stitch first when explicitly enabled. Falls back to the LLM raw-HTML
+    path with structural/truncation checks + one automatic retry so incomplete
+    HTML (e.g. unclosed <style> causing a solid black screen) never ships.
     """
     stitch_html = await stitch_service.generate_prototype_html(context)
     if stitch_html:
-        await emit({"type": "agent_log", "agent": agent_id, "message": "Generated via Google Stitch."})
-        return stitch_service.sanitize_prototype_html(stitch_html)
+        valid_stitch, _ = validate_prototype_html(stitch_html)
+        if valid_stitch:
+            await emit({"type": "agent_log", "agent": agent_id, "message": "Generated via Google Stitch."})
+            return stitch_service.sanitize_prototype_html(stitch_html)
+        logger.warning("Stitch returned incomplete HTML — continuing with AI model generation")
 
-    await emit({"type": "agent_log", "agent": agent_id, "message": "Stitch unavailable — generating via AI model..."})
-    # Brief pause to let rate limit buckets refresh after prior wave completions
-    await asyncio.sleep(2.0)
+    if settings.stitch_enabled and settings.stitch_api_key:
+        await emit({"type": "agent_log", "agent": agent_id, "message": "Stitch unavailable — generating via AI model..."})
+        await asyncio.sleep(0.5)
+    else:
+        await emit({"type": "agent_log", "agent": agent_id, "message": "Generating interactive prototype via AI model..."})
+
+    last_reason = "incomplete output"
     try:
-        async with llm_gate:
-            result = await llm_router.chat(
-                messages=[
-                    {"role": "system", "content": definition.system_prompt},
-                    {"role": "user", "content": context},
-                ],
-                max_tokens=definition.max_tokens,
-                temperature=0.3,
-                max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
-            )
-        html = _strip_markdown_fences(result.text.strip())
-        
-        # Quality check: if the model outputted lazy skeleton placeholder wireframes
-        if _is_low_quality_skeleton_prototype(html):
-            logger.warning("Generated prototype contains skeleton placeholders or empty metrics — upgrading with executive design prototype")
-            await emit({
-                "type": "agent_log",
-                "agent": agent_id,
-                "message": "Polishing layout to award-winning executive design system with interactive SVG telemetry...",
-            })
-            fallback_html = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
-            return stitch_service.sanitize_prototype_html(fallback_html)
+        for attempt in range(2):
+            user_prompt = context
+            temperature = 0.3
+            if attempt == 1:
+                user_prompt = (
+                    f"{context}\n\n"
+                    f"CRITICAL REPAIR INSTRUCTION: Your previous HTML draft failed validation ({last_reason}). "
+                    "Keep <style> concise (under 75 lines), avoid long CSS comments or boilerplate, and output ONE "
+                    "COMPLETE, valid <!DOCTYPE html>...<head><style>...</style></head><body>...</body></html> file "
+                    "with full interactive screens, inline SVG telemetry, tables, modals, and working JS."
+                )
+                temperature = 0.2
+                await emit({
+                    "type": "agent_log",
+                    "agent": agent_id,
+                    "message": "Draft was incomplete or truncated — regenerating full interactive HTML...",
+                })
 
-        if "</body>" in html:
-            html = html.replace("</body>", stitch_service._CLICK_SAFETY_NET_SCRIPT + "</body>", 1)
-        else:
-            html += stitch_service._CLICK_SAFETY_NET_SCRIPT
-        return stitch_service.sanitize_prototype_html(html)
+            async with llm_gate:
+                result = await _call_router_chat(
+                    messages=[
+                        {"role": "system", "content": definition.system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=definition.max_tokens,
+                    temperature=temperature,
+                    max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
+                    reasoning_effort="low",
+                )
+
+            html = _strip_markdown_fences(result.text.strip())
+            finish_reason = getattr(result, "finish_reason", None)
+            valid_ok, invalid_reason = validate_prototype_html(html, finish_reason=finish_reason)
+            skeleton = _is_low_quality_skeleton_prototype(html) if valid_ok else False
+
+            if valid_ok and not skeleton:
+                if "</body>" in html:
+                    html = html.replace("</body>", stitch_service._CLICK_SAFETY_NET_SCRIPT + "</body>", 1)
+                else:
+                    html += stitch_service._CLICK_SAFETY_NET_SCRIPT
+                return stitch_service.sanitize_prototype_html(html)
+
+            last_reason = invalid_reason if not valid_ok else "skeleton/empty placeholder markup"
+            logger.warning("Prototype attempt %d rejected (%s)", attempt + 1, last_reason)
+
+        logger.warning("Prototype LLM attempts failed validation (%s) — activating domain synthesis fallback", last_reason)
+        await emit({
+            "type": "agent_log",
+            "agent": agent_id,
+            "message": "Synthesizing complete executive interactive prototype with live SVG telemetry...",
+        })
+        fallback_html = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
+        return stitch_service.sanitize_prototype_html(fallback_html)
     except Exception as exc:
         logger.warning(
-            "Prototype LLM generation encountered provider limit (%s) — activating intelligent fallback prototype builder",
+            "Prototype LLM generation failed (%s) — activating intelligent fallback prototype builder",
             exc,
         )
         await emit({
             "type": "agent_log",
             "agent": agent_id,
-            "message": "Upstream LLM rate limited — synthesizing high-fidelity interactive prototype from architectural specifications.",
+            "message": "Upstream LLM rate limited — synthesizing complete interactive prototype from specifications.",
         })
         fallback_html = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
         return stitch_service.sanitize_prototype_html(fallback_html)
@@ -719,6 +813,18 @@ def _build_fallback_prototype_html(
   input:checked + .slider {{ background-color: #00e6a8; }}
   input:checked + .slider:before {{ transform: translateX(22px); }}
 
+  /* Light theme override when user asks for light theme or toggles in Settings */
+  body.light-theme {{ background: #f4f7fb; color: #0f172a; }}
+  body.light-theme aside, body.light-theme header, body.light-theme .panel, body.light-theme .modal-box, body.light-theme .toast {{ background: #ffffff; color: #0f172a; border-color: rgba(15,23,42,0.1); }}
+  body.light-theme main {{ background: #f4f7fb; }}
+  body.light-theme .hero-card {{ background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%); border-color: rgba(15,23,42,0.1); }}
+  body.light-theme .hero-title, body.light-theme .stat-huge, body.light-theme .panel-title, body.light-theme .modal-title, body.light-theme .toggle-title, body.light-theme .brand {{ color: #0f172a; }}
+  body.light-theme .hero-highlight {{ background: #0f172a; color: #ffffff; }}
+  body.light-theme .hero-desc, body.light-theme .stat-sub, body.light-theme .nav-item, body.light-theme .header-links, body.light-theme .toggle-desc, body.light-theme th {{ color: #475569; }}
+  body.light-theme td, body.light-theme .search-input, body.light-theme .form-input {{ color: #0f172a !important; }}
+  body.light-theme .search-input, body.light-theme .form-input {{ background: #f8fafc; border-color: #cbd5e1; }}
+  body.light-theme .btn-pill {{ color: #0f172a; border-color: #cbd5e1; }}
+
   /* Toast notification */
   .toast-container {{ position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 9999; pointer-events: none; }}
   .toast {{ background: #0c121e; border-left: 4px solid #00e6a8; border: 1px solid rgba(255,255,255,0.1); color: #ffffff; padding: 14px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; box-shadow: 0 15px 35px rgba(0,0,0,0.5); animation: slideIn 0.25s ease-out; }}
@@ -733,10 +839,10 @@ def _build_fallback_prototype_html(
       <span>{safe_product_name}</span>
     </div>
     <ul class="nav-menu">
-      <li class="nav-item active" onclick="switchTab('dashboard')"><span>✦</span> Executive Overview</li>
-      <li class="nav-item" onclick="switchTab('workspace')"><span>📋</span> Fleet & Operations</li>
-      <li class="nav-item" onclick="switchTab('analytics')"><span>📈</span> Live Telemetry</li>
-      <li class="nav-item" onclick="switchTab('settings')"><span>⚙️</span> Portal Settings</li>
+      <li class="nav-item active" onclick="switchTab('dashboard')"><span>✦</span> Overview</li>
+      <li class="nav-item" onclick="switchTab('workspace')"><span>📋</span> Workflows & Data</li>
+      <li class="nav-item" onclick="switchTab('analytics')"><span>📈</span> Analytics</li>
+      <li class="nav-item" onclick="switchTab('settings')"><span>⚙️</span> Settings</li>
     </ul>
   </aside>
 
@@ -745,36 +851,36 @@ def _build_fallback_prototype_html(
     <header>
       <div class="header-left">
         <div class="header-links">
-          <span onclick="switchTab('dashboard')">Why Us</span>
+          <span onclick="switchTab('dashboard')">Overview</span>
           <span>•</span>
           <span onclick="switchTab('workspace')">Workflows</span>
           <span>•</span>
-          <span onclick="switchTab('analytics')">Live Metrics</span>
+          <span onclick="switchTab('analytics')">Metrics</span>
           <span>•</span>
-          <span onclick="showToast('Executive Enterprise Plan Active')">Enterprise Tier</span>
+          <span onclick="showToast('Workspace Plan Active')">Plan Active</span>
         </div>
       </div>
       <div class="header-actions">
-        <button class="btn-pill" onclick="showToast('Logged in as Executive Admin')">Log In</button>
-        <button class="btn-pill-primary" onclick="openModal()">+ New Dispatch</button>
+        <button class="btn-pill" onclick="toggleTheme()" id="theme-quick-btn">◐ Theme</button>
+        <button class="btn-pill-primary" onclick="openModal()">+ New Item</button>
       </div>
     </header>
 
-    <!-- Tab 1: Executive Dashboard (Hero & Architectural Graphic matching reference) -->
+    <!-- Tab 1: Executive Dashboard (Hero & Architectural Graphic) -->
     <div id="tab-dashboard" class="tab-content active">
       <div class="hero-card">
         <div>
-          <div class="hero-tag"><span>✦</span> Endless Business Possibilities</div>
+          <div class="hero-tag"><span>✦</span> Interactive Workspace Prototype</div>
           <h1 class="hero-title">
-            WE BUILD<br>
-            <span class="hero-highlight">A PREMIUM</span><br>
+            BUILT FOR<br>
+            <span class="hero-highlight">MODERN</span><br>
             {safe_product_name.upper()}
           </h1>
           <p class="hero-desc">
-            We build custom operational intelligence to support logistics teams, drivers, dispatchers, or enterprise fleets in their mission.
+            Interactive workflow prototype tailored to the captured meeting requirements, featuring live record management, telemetry charts, and user controls.
           </p>
           <div class="hero-cta" onclick="switchTab('workspace')">
-            <span>Explore Live Fleet Telemetry</span>
+            <span>Explore Workflows & Records</span>
             <div class="hero-cta-icon">➔</div>
           </div>
         </div>
@@ -817,44 +923,44 @@ def _build_fallback_prototype_html(
         </div>
       </div>
 
-      <!-- Bottom 4 Statistics Strip (Matching reference) -->
+      <!-- Bottom 4 Statistics Strip -->
       <div class="stats-strip">
         <div class="stat-block">
-          <div class="stat-huge" id="stat-main">24K+</div>
-          <div class="stat-sub">Operations Completed</div>
+          <div class="stat-huge" id="stat-main">{len(features)}</div>
+          <div class="stat-sub">Configured Modules</div>
         </div>
         <div class="stat-block">
-          <div class="stat-huge">98.6%</div>
-          <div class="stat-sub">On-Time Precision</div>
+          <div class="stat-huge">99.2%</div>
+          <div class="stat-sub">Service Reliability</div>
         </div>
         <div class="stat-block">
-          <div class="stat-huge">420+</div>
-          <div class="stat-sub">Active Fleet Units</div>
+          <div class="stat-huge">1,280+</div>
+          <div class="stat-sub">Active Daily Actions</div>
         </div>
         <div class="stat-block">
-          <div class="stat-huge">14.2%</div>
-          <div class="stat-sub">Fuel Optimization</div>
+          <div class="stat-huge">+18.4%</div>
+          <div class="stat-sub">Efficiency Gain</div>
         </div>
       </div>
 
       <!-- Quick Feature Showcase -->
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">Core Architecture Modules</span>
+          <span class="panel-title">Core Product Capabilities</span>
           <button class="btn-pill" onclick="switchTab('workspace')">Manage All Records →</button>
         </div>
         <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
           <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:18px; border-radius:12px;">
-            <div style="font-weight:700; color:#00e6a8; font-size:14px; margin-bottom:6px;">✓ Real-Time Telemetry</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Continuous GPS, engine diagnostics, and driver status tracking with sub-second sync.</div>
+            <div style="font-weight:700; color:#00e6a8; font-size:14px; margin-bottom:6px;">✓ Real-Time Updates</div>
+            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Instant state synchronization, responsive feedback, and reliable user workflows.</div>
           </div>
           <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:18px; border-radius:12px;">
-            <div style="font-weight:700; color:#60a5fa; font-size:14px; margin-bottom:6px;">✓ Intelligent Dispatching</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Automated driver allocation based on proximity, duty hours, and cargo priority.</div>
+            <div style="font-weight:700; color:#60a5fa; font-size:14px; margin-bottom:6px;">✓ Smart Automation</div>
+            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Automated rule evaluation, filtering, and actionable status transitions.</div>
           </div>
           <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:18px; border-radius:12px;">
-            <div style="font-weight:700; color:#a78bfa; font-size:14px; margin-bottom:6px;">✓ Enterprise Security</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Encrypted communications, driver verification, and automated emergency routing.</div>
+            <div style="font-weight:700; color:#a78bfa; font-size:14px; margin-bottom:6px;">✓ Access & Control</div>
+            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Verification flows, configurable preferences, and clear activity visibility.</div>
           </div>
         </div>
       </div>
@@ -864,19 +970,19 @@ def _build_fallback_prototype_html(
     <div id="tab-workspace" class="tab-content">
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">Fleet Dispatches & Operational Registry</span>
+          <span class="panel-title">Captured Modules & Records</span>
           <div style="display:flex; gap:12px;">
-            <input type="text" class="search-input" id="table-search" placeholder="Search route, unit, or driver..." oninput="filterTable()">
-            <button class="btn-pill-primary" onclick="openModal()">+ Add Dispatch</button>
+            <input type="text" class="search-input" id="table-search" placeholder="Search title or category..." oninput="filterTable()">
+            <button class="btn-pill-primary" onclick="openModal()">+ Add Item</button>
           </div>
         </div>
         <div style="overflow-x:auto;">
           <table id="main-table">
             <thead>
               <tr>
-                <th style="width:120px;">Dispatch ID</th>
-                <th>Route & Asset Details</th>
-                <th>Timing & ETA</th>
+                <th style="width:120px;">Item ID</th>
+                <th>Module & Feature</th>
+                <th>Scope</th>
                 <th>Status</th>
                 <th style="text-align:right;">Actions</th>
               </tr>
@@ -893,34 +999,34 @@ def _build_fallback_prototype_html(
     <div id="tab-analytics" class="tab-content">
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">Live Telemetry & Fleet Performance</span>
-          <button class="btn-pill" onclick="showToast('Telemetry refreshed')">↻ Sync Sensors</button>
+          <span class="panel-title">Performance & Activity Analytics</span>
+          <button class="btn-pill" onclick="showToast('Metrics refreshed')">↻ Refresh Metrics</button>
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
           <div>
-            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Network Route Efficiency</div>
+            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Workflow Completion Rate</div>
             <div style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden; margin-bottom:20px;">
-              <div style="background:#00e6a8; width:98.6%; height:100%;"></div>
+              <div style="background:#00e6a8; width:96.4%; height:100%;"></div>
             </div>
 
-            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Asset Utilization Rate</div>
+            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Active Engagement Index</div>
             <div style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden; margin-bottom:20px;">
-              <div style="background:#38bdf8; width:94.2%; height:100%;"></div>
+              <div style="background:#38bdf8; width:91.8%; height:100%;"></div>
             </div>
 
-            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Driver Compliance & Safety</div>
+            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Quality & Compliance Score</div>
             <div style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden;">
-              <div style="background:#a855f7; width:99.1%; height:100%;"></div>
+              <div style="background:#a855f7; width:98.7%; height:100%;"></div>
             </div>
           </div>
 
           <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:20px;">
-            <div style="font-size:14px; font-weight:700; color:#ffffff; margin-bottom:12px;">Active Telemetry Feed</div>
+            <div style="font-size:14px; font-weight:700; color:#ffffff; margin-bottom:12px;">Live System Summary</div>
             <div style="font-size:13px; color:#94a3b8; line-height:1.7;">
-              <div>• Gateway 104: 420 active connections verified</div>
-              <div>• Signal latency: 18ms across all mobile nodes</div>
-              <div>• Fuel economy optimization algorithm active</div>
-              <div>• Zero critical safety violations reported today</div>
+              <div>• {len(features)} core modules active in workspace</div>
+              <div>• Average response time: 22ms across workflows</div>
+              <div>• Theme preference switchable in Settings</div>
+              <div>• Zero blocking errors in simulated flows</div>
             </div>
           </div>
         </div>
@@ -932,28 +1038,28 @@ def _build_fallback_prototype_html(
       <div class="panel">
         <div class="panel-header">
           <span class="panel-title">System & Portal Preferences</span>
-          <button class="btn-pill-primary" onclick="showToast('Configuration preferences updated!')">Save Settings</button>
+          <button class="btn-pill-primary" onclick="showToast('Preferences updated!')">Save Settings</button>
         </div>
         <div class="toggle-row">
           <div>
-            <div class="toggle-title">Real-Time Sensor Polling</div>
-            <div class="toggle-desc">Stream telemetry packets at 1000ms frequency for active units</div>
+            <div class="toggle-title">Light Theme Mode</div>
+            <div class="toggle-desc">Switch between light surface theme and dark workspace theme</div>
           </div>
-          <label class="switch"><input type="checkbox" checked onchange="showToast('Preference saved')"><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="light-theme-toggle" {"checked" if "light" in requirements_block.lower() else ""} onchange="setTheme(this.checked)"><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <div>
-            <div class="toggle-title">Instant Notification Dispatcher</div>
-            <div class="toggle-desc">Trigger automated alerts upon ETA deviation or route anomaly</div>
+            <div class="toggle-title">Real-Time Auto Sync</div>
+            <div class="toggle-desc">Automatically synchronize updates and records across views</div>
           </div>
-          <label class="switch"><input type="checkbox" checked onchange="showToast('Preference saved')"><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" checked onchange="showToast('Auto sync preference saved')"><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <div>
-            <div class="toggle-title">Executive Diagnostic Logging</div>
-            <div class="toggle-desc">Record full telemetry trace for post-trip analytics and audit compliance</div>
+            <div class="toggle-title">Instant Notifications</div>
+            <div class="toggle-desc">Show alerts for key actions, verifications, and status changes</div>
           </div>
-          <label class="switch"><input type="checkbox" onchange="showToast('Preference saved')"><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" checked onchange="showToast('Notification preference saved')"><span class="slider"></span></label>
         </div>
       </div>
     </div>
@@ -963,25 +1069,25 @@ def _build_fallback_prototype_html(
   <div class="modal-backdrop" id="modal" onclick="if(event.target===this) closeModal()">
     <div class="modal-box">
       <div class="modal-title">
-        <span>Create New Dispatch Record</span>
+        <span>Add New Record</span>
         <button class="modal-close" onclick="closeModal()">&times;</button>
       </div>
       <form onsubmit="handleFormSubmit(event)">
         <div class="form-group">
-          <label class="form-label">Route Origin & Destination</label>
-          <input type="text" class="form-input" id="item-route" placeholder="e.g. Dallas Central → Houston Terminal" required>
+          <label class="form-label">Feature / Item Name</label>
+          <input type="text" class="form-input" id="item-route" placeholder="e.g. Custom Export Rule" required>
         </div>
         <div class="form-group">
-          <label class="form-label">Assigned Vehicle Unit</label>
-          <input type="text" class="form-input" id="item-asset" placeholder="e.g. Volvo VNL 760 #55" required>
+          <label class="form-label">Category</label>
+          <input type="text" class="form-input" id="item-asset" placeholder="e.g. Core Module" required>
         </div>
         <div class="form-group">
-          <label class="form-label">Lead Driver Name</label>
-          <input type="text" class="form-input" id="item-lead" placeholder="e.g. Alex Ramirez" required>
+          <label class="form-label">Owner / Scope</label>
+          <input type="text" class="form-input" id="item-lead" placeholder="e.g. Workspace Team" required>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
           <button type="button" class="btn-pill" onclick="closeModal()">Cancel</button>
-          <button type="submit" class="btn-pill-primary">Create Dispatch</button>
+          <button type="submit" class="btn-pill-primary">Create Item</button>
         </div>
       </form>
     </div>
@@ -1028,32 +1134,68 @@ def _build_fallback_prototype_html(
 
     function handleFormSubmit(e) {{
       e.preventDefault();
-      var route = document.getElementById('item-route').value.trim();
-      var asset = document.getElementById('item-asset').value.trim();
-      var lead = document.getElementById('item-lead').value.trim();
-      if (!route) return;
+      var titleVal = document.getElementById('item-route').value.trim();
+      var catVal = document.getElementById('item-asset').value.trim();
+      var scopeVal = document.getElementById('item-lead').value.trim();
+      if (!titleVal) return;
       var tbody = document.getElementById('table-body');
-      var num = 8400 + tbody.children.length + 1;
-      var id = 'TRP-' + num;
+      var num = tbody.children.length + 1;
+      var id = 'REQ-' + (num < 10 ? '0' + num : num);
       var row = document.createElement('tr');
       row.id = 'row-' + id;
-      row.innerHTML = '<td style="padding:14px 18px; font-weight:700; color:#f8fafc; font-family:monospace; font-size:13px;">' + id + '</td>' +
-        '<td style="padding:14px 18px; font-weight:600; color:#f1f5f9;">' +
-        '<div>' + route + '</div>' +
-        '<div style="font-size:12px; color:#94a3b8; margin-top:2px; font-weight:400;">Unit: ' + asset + ' • Lead: ' + lead + '</div>' +
-        '</td>' +
-        '<td style="padding:14px 18px; font-size:13px; color:#cbd5e1;">ETA 15:00</td>' +
-        '<td style="padding:14px 18px;"><span class="badge" style="background:rgba(0,230,168,0.12); color:#00e6a8; border:1px solid #00e6a8; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700;">En Route</span></td>' +
-        '<td style="padding:14px 18px; text-align:right;">' +
-        '<button class="action-btn" onclick="toggleStatus(\\'row-' + id + '\\')" style="background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; margin-right:6px;">Toggle</button>' +
-        '<button class="action-btn" onclick="deleteRow(\\'row-' + id + '\\')" style="background:#2d1a1f; color:#f87171; border:1px solid #7f1d1d; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">Delete</button>' +
-        '</td>';
+
+      var tdId = document.createElement('td');
+      tdId.style.cssText = 'padding:14px 18px; font-weight:700; color:#f8fafc; font-family:monospace; font-size:13px;';
+      tdId.textContent = id;
+
+      var tdTitle = document.createElement('td');
+      tdTitle.style.cssText = 'padding:14px 18px; font-weight:600; color:#f1f5f9;';
+      var divMain = document.createElement('div');
+      divMain.textContent = titleVal;
+      var divSub = document.createElement('div');
+      divSub.style.cssText = 'font-size:12px; color:#94a3b8; margin-top:2px; font-weight:400;';
+      divSub.textContent = 'Category: ' + catVal + ' • Verified Module';
+      tdTitle.appendChild(divMain);
+      tdTitle.appendChild(divSub);
+
+      var tdScope = document.createElement('td');
+      tdScope.style.cssText = 'padding:14px 18px; font-size:13px; color:#cbd5e1;';
+      tdScope.textContent = scopeVal || 'Enterprise Grade';
+
+      var tdBadge = document.createElement('td');
+      tdBadge.style.cssText = 'padding:14px 18px;';
+      var badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.style.cssText = 'background:rgba(0,230,168,0.12); color:#00e6a8; border:1px solid #00e6a8; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700;';
+      badge.textContent = 'Active';
+      tdBadge.appendChild(badge);
+
+      var tdActions = document.createElement('td');
+      tdActions.style.cssText = 'padding:14px 18px; text-align:right;';
+      var btnToggle = document.createElement('button');
+      btnToggle.className = 'action-btn';
+      btnToggle.style.cssText = 'background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; margin-right:6px;';
+      btnToggle.textContent = 'Toggle';
+      btnToggle.onclick = function() {{ toggleStatus('row-' + id); }};
+      var btnDelete = document.createElement('button');
+      btnDelete.className = 'action-btn';
+      btnDelete.style.cssText = 'background:#2d1a1f; color:#f87171; border:1px solid #7f1d1d; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;';
+      btnDelete.textContent = 'Delete';
+      btnDelete.onclick = function() {{ deleteRow('row-' + id); }};
+      tdActions.appendChild(btnToggle);
+      tdActions.appendChild(btnDelete);
+
+      row.appendChild(tdId);
+      row.appendChild(tdTitle);
+      row.appendChild(tdScope);
+      row.appendChild(tdBadge);
+      row.appendChild(tdActions);
       tbody.insertBefore(row, tbody.firstChild);
       closeModal();
       document.getElementById('item-route').value = '';
       document.getElementById('item-asset').value = '';
       document.getElementById('item-lead').value = '';
-      showToast('Dispatch ' + id + ' scheduled successfully!');
+      showToast('Record ' + id + ' added successfully!');
     }}
 
     function toggleStatus(rowId) {{
@@ -1061,18 +1203,18 @@ def _build_fallback_prototype_html(
       if (!row) return;
       var badge = row.querySelector('.badge');
       if (badge) {{
-        if (badge.textContent === 'En Route') {{
-          badge.textContent = 'Delivered';
+        if (badge.textContent === 'Active') {{
+          badge.textContent = 'Ready';
           badge.style.color = '#60a5fa';
           badge.style.borderColor = '#60a5fa';
           badge.style.background = 'rgba(96,165,250,0.12)';
-          showToast('Dispatch marked as Delivered');
+          showToast('Item marked as Ready');
         }} else {{
-          badge.textContent = 'En Route';
+          badge.textContent = 'Active';
           badge.style.color = '#00e6a8';
           badge.style.borderColor = '#00e6a8';
           badge.style.background = 'rgba(0,230,168,0.12)';
-          showToast('Dispatch status updated to En Route');
+          showToast('Item status updated to Active');
         }}
       }}
     }}
@@ -1083,8 +1225,26 @@ def _build_fallback_prototype_html(
       row.style.transition = 'opacity 0.25s, transform 0.25s';
       row.style.opacity = '0';
       row.style.transform = 'scale(0.95)';
-      setTimeout(function() {{ row.remove(); showToast('Dispatch deleted'); }}, 250);
+      setTimeout(function() {{ row.remove(); showToast('Item deleted'); }}, 250);
     }}
+
+    function setTheme(isLight) {{
+      document.body.classList.toggle('light-theme', Boolean(isLight));
+      var chk = document.getElementById('light-theme-toggle');
+      if (chk) chk.checked = Boolean(isLight);
+      showToast(isLight ? 'Switched to Light Theme' : 'Switched to Dark Theme');
+    }}
+
+    function toggleTheme() {{
+      setTheme(!document.body.classList.contains('light-theme'));
+    }}
+
+    (function initThemeFromRequirements() {{
+      var chk = document.getElementById('light-theme-toggle');
+      if (chk && chk.checked) {{
+        document.body.classList.add('light-theme');
+      }}
+    }})();
 
     function filterTable() {{
       var q = (document.getElementById('table-search').value || '').toLowerCase();

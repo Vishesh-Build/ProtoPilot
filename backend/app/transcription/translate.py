@@ -77,6 +77,9 @@ async def translate_to_english(text: str, source_language: str) -> str:
             # long utterance from being truncated.
             max_tokens=max(settings.llm_default_max_tokens, len(text.split()) * 6 + 200),
             temperature=0.1,
+            max_rate_limit_wait=settings.llm_realtime_max_rate_limit_wait,
+            reasoning_effort="low",
+            timeout=settings.llm_realtime_timeout_seconds,
         )
         return result.text.strip()
 
