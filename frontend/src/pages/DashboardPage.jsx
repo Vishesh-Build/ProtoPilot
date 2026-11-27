@@ -253,12 +253,7 @@ export default function DashboardPage({ onNewMeeting, onResumeMeeting, onOpenWor
   const [profileOpen, setProfileOpen] = useState(false);
 
   const handleExploreDemo = () => {
-    const withProto = meetings.find((m) => m.has_prototype);
-    if (withProto) {
-      onOpenPrototype?.(withProto.meeting_id);
-    } else {
-      onOpenPrototype?.("demo-sample");
-    }
+    onOpenPrototype?.("demo-sample");
   };
 
   // Delete-a-meeting confirm flow. Deletion is permanent (the backend wipes the
