@@ -240,6 +240,37 @@ def param_count(model_id: str) -> float:
     return float(match.group(1)) if match else 999.0
 
 
+def quality_ranked_candidates(
+    candidates: list[str],
+    dead: set[str] | None = None,
+    tried: set[str] | None = None,
+) -> list[str]:
+    """
+    Reorders configured candidates so full-capability / larger models come first
+    for creative HTML/UI synthesis without mutating the fast default `self.model`.
+    """
+    excluded = (dead or set()) | (tried or set())
+    avail = [(idx, m) for idx, m in enumerate(candidates) if m not in excluded]
+
+    def score(item: tuple[int, str]) -> tuple[int, float, int]:
+        idx, mid = item
+        low = mid.lower()
+        # Match hyphen/slash-delimited tokens so "gemini" does not match "mini".
+        tokens = set(re.split(r"[^a-z0-9]+", low))
+        is_lite_or_tiny = bool(tokens & {"lite", "bolt", "xs", "tiny", "mini", "nano"})
+        if "minimax" in low and "flash" in low and not (tokens & {"lite", "nano"}):
+            is_lite_or_tiny = False
+        params = param_count(mid)
+        is_small_param = params < 25.0
+        tier = 1 if (is_lite_or_tiny or is_small_param) else 0
+        # Unknown param counts (e.g. gemini-3-flash-preview) rank cleanly above tiny params inside same tier.
+        size_rank = -(params if params < 999.0 else 100.0)
+        return (tier, size_rank, idx)
+
+    avail.sort(key=score)
+    return [m for _, m in avail]
+
+
 def rank_chat_models(served: list[str]) -> list[str]:
     """
     The served ids that are usable for chat, best guess first.
@@ -390,6 +421,11 @@ class OpenAICompatibleProvider:
             "Content-Type": "application/json",
         }
 
+    def pick_quality_model(self, *, tried: set[str] | None = None) -> str | None:
+        """Select highest-capability configured candidate without mutating default self.model."""
+        ranked = quality_ranked_candidates(self.candidates, self._dead_models, tried)
+        return ranked[0] if ranked else None
+
     def rotate_candidate(self, failed_model: str | None = None, *, tried: set[str] | None = None) -> str | None:
         """
         Rotates self.model to another live candidate in self.candidates (e.g.
@@ -419,29 +455,41 @@ class OpenAICompatibleProvider:
         *,
         reasoning_effort: str | None = None,
         timeout: float | None = None,
+        model_override: str | None = None,
     ) -> ChatResult:
         if not self.is_configured:
             raise ProviderError(self.name, "no API key configured")
-        if not self.model:
+        if not (model_override or self.model):
             raise ProviderError(self.name, "no model id configured")
 
+        active_override = model_override
+
         async def _invoke():
-            if reasoning_effort is None and timeout is None:
-                return await self._post_chat(messages, max_tokens, temperature)
-            return await self._post_chat(
-                messages, max_tokens, temperature, reasoning_effort=reasoning_effort, timeout=timeout,
-            )
+            kwargs: dict = {}
+            if reasoning_effort is not None:
+                kwargs["reasoning_effort"] = reasoning_effort
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            if active_override is not None:
+                kwargs["model_override"] = active_override
+            return await self._post_chat(messages, max_tokens, temperature, **kwargs)
 
         try:
             return await _invoke()
         except ProviderError as first_error:
             if first_error.model_capacity_exceeded:
-                failed_model = first_error.model or self.model
+                failed_model = first_error.model or active_override or self.model
                 self._dead_models.add(failed_model)
-                remaining = [c for c in self.candidates if c not in self._dead_models and c != failed_model]
-                if remaining:
-                    replacement = remaining[0]
-                    self.model = replacement
+                if active_override is not None:
+                    replacement = self.pick_quality_model(tried={failed_model})
+                else:
+                    remaining = [c for c in self.candidates if c not in self._dead_models and c != failed_model]
+                    replacement = remaining[0] if remaining else None
+                if replacement:
+                    if active_override is not None:
+                        active_override = replacement
+                    else:
+                        self.model = replacement
                     logger.warning(
                         "%s: model %r hit capacity/TPM limit (%s) — retrying with candidate %r",
                         self.name, failed_model, first_error.message, replacement,
@@ -452,10 +500,17 @@ class OpenAICompatibleProvider:
                 raise
             # The id that actually failed, not whatever self.model says now —
             # a concurrent call may already have replaced it.
-            dead_model = first_error.model or self.model
+            dead_model = first_error.model or active_override or self.model
+            if active_override is not None:
+                self._dead_models.add(dead_model)
+                fallback_next = self.pick_quality_model(tried={dead_model})
+                if fallback_next:
+                    active_override = fallback_next
+                    return await _invoke()
             replacement = await self._rediscover_model(dead_model)
             if replacement is None:
                 raise
+            active_override = None
             logger.warning(
                 "%s: model %r is gone (%s) — retrying once with %r, which the provider "
                 "currently lists as available",
@@ -473,12 +528,13 @@ class OpenAICompatibleProvider:
         *,
         reasoning_effort: str | None = None,
         timeout: float | None = None,
+        model_override: str | None = None,
     ) -> ChatResult:
         url = f"{self.base_url}/chat/completions"
         # Read once: self.model can change mid-request when another coroutine
         # discovers this id is dead, and the request, the result and any error
         # all have to agree on which model was really used.
-        model = self.model
+        model = model_override or self.model
         payload = {
             "model": model,
             "messages": messages,

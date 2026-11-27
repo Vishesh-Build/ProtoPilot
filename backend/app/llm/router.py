@@ -106,6 +106,7 @@ class LLMRouter:
         *,
         reasoning_effort: str | None = None,
         timeout: float | None = None,
+        model_override: str | None = None,
     ) -> ChatResult:
         kwargs: dict = {}
         try:
@@ -117,6 +118,8 @@ class LLMRouter:
             kwargs["reasoning_effort"] = reasoning_effort
         if timeout is not None and ("timeout" in params or has_varkw):
             kwargs["timeout"] = timeout
+        if model_override is not None and ("model_override" in params or has_varkw):
+            kwargs["model_override"] = model_override
         return await provider.chat(messages, max_tokens, temperature, **kwargs)
 
     async def _chat_with_retry(
@@ -129,6 +132,7 @@ class LLMRouter:
         *,
         reasoning_effort: str | None = None,
         timeout: float | None = None,
+        prefer_quality: bool = False,
     ):
         """
         One provider, retried in place only for the two transient failures:
@@ -152,7 +156,12 @@ class LLMRouter:
         tried_models: set[str] = set()
 
         while True:
-            current_model = getattr(provider, "model", None)
+            model_override = None
+            if prefer_quality and hasattr(provider, "pick_quality_model"):
+                model_override = provider.pick_quality_model(tried=tried_models)
+                current_model = model_override or getattr(provider, "model", None)
+            else:
+                current_model = getattr(provider, "model", None)
             if current_model:
                 tried_models.add(current_model)
             try:
@@ -163,12 +172,17 @@ class LLMRouter:
                     temperature,
                     reasoning_effort=reasoning_effort,
                     timeout=timeout,
+                    model_override=model_override,
                 )
             except ProviderError as e:
                 is_empty_reply = "empty reply" in (e.message or "").lower()
                 rotatable = e.rate_limited or e.transient or e.model_gone or is_empty_reply
-                if rotatable and hasattr(provider, "rotate_candidate"):
-                    next_model = provider.rotate_candidate(e.model, tried=tried_models)
+                if rotatable:
+                    next_model = None
+                    if prefer_quality and hasattr(provider, "pick_quality_model"):
+                        next_model = provider.pick_quality_model(tried=tried_models)
+                    elif hasattr(provider, "rotate_candidate"):
+                        next_model = provider.rotate_candidate(e.model, tried=tried_models)
                     if next_model:
                         logger.warning(
                             "%s: rotating model %r -> %r immediately after error (%s)",
@@ -225,6 +239,7 @@ class LLMRouter:
         max_rate_limit_wait: float | None = None,
         reasoning_effort: str | None = None,
         timeout: float | None = None,
+        prefer_quality: bool = False,
     ) -> ChatResult:
         """
         Try each provider in order. Returns the first successful result.
@@ -261,6 +276,7 @@ class LLMRouter:
                     max_rate_limit_wait,
                     reasoning_effort=reasoning_effort,
                     timeout=timeout,
+                    prefer_quality=prefer_quality,
                 )
                 self._cooldown_until.pop(provider.name, None)
                 logger.info(

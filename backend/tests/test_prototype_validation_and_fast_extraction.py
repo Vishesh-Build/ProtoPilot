@@ -99,15 +99,62 @@ class PrototypeValidationTest(unittest.TestCase):
     def test_prototype_agent_token_ceiling_is_sufficient(self):
         self.assertGreaterEqual(definitions.AGENT_DEFINITIONS["prototype"].max_tokens, 8192)
 
+    def test_rejects_bare_login_otp_gate_landing_screen(self):
+        pad_css = " .pad{color:#94a3b8;}" * 45
+        bare_login = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>FinSync</title>
+<style>body{{background:#0b0f19;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh}}{pad_css}</style>
+</head>
+<body>
+  <div class="card">
+    <h1>FinSync</h1>
+    <p>Track smart, spend wisely. Enter your mobile number to access your secure UPI expense tracker.</p>
+    <input type="text" value="+1 (555) 849-2011">
+    <button>Send Verification Code</button>
+  </div>
+  <script>console.log('otp gate');</script>
+</body>
+</html>"""
+        self.assertTrue(orchestrator._is_low_quality_skeleton_prototype(bare_login))
+        issue = orchestrator._diagnose_prototype_quality(bare_login)
+        self.assertIn("login/otp gate", issue.lower())
+
     def test_domain_fallback_html_is_complete_agnostic_and_valid(self):
         html = orchestrator._build_fallback_prototype_html(
-            requirements_block="- [High] Mobile OTP Login (Auth)\n- [Medium] Light theme in settings (UI)"
+            requirements_block="- [High] Mobile OTP Login (Auth)\n- [Medium] Light theme in settings (UI)\n- [High] Auto-sync UPI Expense Ledger (Payments)"
         )
         ok, reason = orchestrator.validate_prototype_html(html)
         self.assertTrue(ok, reason)
+        self.assertFalse(orchestrator._is_low_quality_skeleton_prototype(html))
         self.assertNotIn("Fleet Dispatches", html)
         self.assertNotIn("Fuel Optimization", html)
         self.assertIn("light-theme-toggle", html)
+        self.assertIn("view-overview", html)
+        self.assertIn("auth-modal", html)
+        self.assertIn("<svg", html)
+
+        for reqs in (
+            "- [High] Patient Triage Queue & Appointment Slots (Healthcare)",
+            "- [High] Storefront Cart & Order Inventory Tracking (Commerce)",
+            "- [High] Team Sprint Kanban & Delivery Roadmap (Productivity)",
+        ):
+            domain_html = orchestrator._build_fallback_prototype_html(requirements_block=reqs)
+            d_ok, d_reason = orchestrator.validate_prototype_html(domain_html)
+            self.assertTrue(d_ok, d_reason)
+            self.assertFalse(orchestrator._is_low_quality_skeleton_prototype(domain_html))
+            self.assertNotIn("REQ-01", domain_html)
+
+    def test_quality_candidate_ordering_prefers_full_models_without_mutating_default(self):
+        from app.llm.providers.gemini import GeminiProvider
+
+        gem = GeminiProvider()
+        gem.api_key = "test-key"
+        self.assertEqual(gem.model, "gemini-3.5-flash-lite")
+        best = gem.pick_quality_model()
+        self.assertEqual(best, "gemini-3-flash-preview")
+        # Default fast model must remain intact for real-time extraction/translation
+        self.assertEqual(gem.model, "gemini-3.5-flash-lite")
 
 
 class PrototypeRetryPipelineTest(unittest.IsolatedAsyncioTestCase):
@@ -157,6 +204,41 @@ class PrototypeRetryPipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(proto_calls), 2)
         self.assertGreaterEqual(proto_calls[0][1], 8192)
         self.assertEqual(proto_calls[0][2], "none")
+
+    async def test_rejects_bare_auth_gate_from_llm_and_recovers_via_executive_fallback(self):
+        events = []
+
+        async def emit(ev):
+            events.append(ev)
+
+        bare_login = """<!DOCTYPE html>
+<html><head><title>FinSync</title><style>body{background:#0b0f19;color:#fff}</style></head>
+<body><main><div class="card"><h1>FinSync</h1><p>Enter your mobile number to access your secure UPI expense tracker.</p>
+<input value="+91 98250 12345"><button>Send Verification Code</button></div></main><script>console.log(1)</script></body></html>"""
+
+        class _LazyLoginRouter:
+            async def chat(self, messages, max_tokens=None, temperature=None, max_rate_limit_wait=None, reasoning_effort=None, prefer_quality=False):
+                system = messages[0]["content"]
+                if "Prototype Builder" in system:
+                    return ChatResult(text=bare_login, provider="gemini", model="gemini-3.5-flash-lite", finish_reason="stop")
+                return ChatResult(text=f"spec for {system[:15]}", provider="gemini", model="gemini-3.5-flash-lite")
+
+        with mock.patch.object(orchestrator, "llm_router", _LazyLoginRouter()), \
+             mock.patch.object(orchestrator, "_WAVE_STAGGER_SECONDS", 0), \
+             mock.patch.object(orchestrator.stitch_service, "generate_prototype_html", new=mock.AsyncMock(return_value=None)):
+            states = await orchestrator.run_pipeline(
+                [
+                    {"title": "Mobile OTP Login", "category": "Auth", "priority": "High"},
+                    {"title": "UPI Expense Tracker", "category": "Fintech", "priority": "High"},
+                ],
+                emit,
+            )
+
+        out = states["prototype"].output or ""
+        self.assertEqual(states["prototype"].status, AgentStatus.COMPLETED)
+        self.assertFalse(orchestrator._is_low_quality_skeleton_prototype(out))
+        self.assertIn("<svg", out)
+        self.assertIn("view-overview", out)
 
 
 class FastRealtimeFailoverTest(unittest.IsolatedAsyncioTestCase):
@@ -485,6 +567,38 @@ class SecurityAndStitchSandboxTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("pp-show-screen", combined)
         self.assertIn("postMessage", combined)
+        self.assertIn("typeof el.onclick === 'function'", stitch_service._CLICK_SAFETY_NET_SCRIPT)
+
+    async def test_tweak_prototype_uses_prefer_quality_and_rejects_stub_downgrade(self):
+        import sys
+        import app.llm.router  # noqa: F401
+        from app.api.meetings import TweakPrototypeRequest, tweak_prototype
+
+        session = MeetingSession(meeting_id="m-tweak-1", host_user_id="host-1")
+        original = orchestrator._build_fallback_prototype_html(
+            requirements_block="- [High] UPI Expense Analytics (Fintech)"
+        )
+        session.replace_agent_outputs({"prototype": original})
+        captured = {}
+
+        class _StubTweakRouter:
+            async def chat(self, messages, **kwargs):
+                captured.update(kwargs)
+                return ChatResult(
+                    text="<!DOCTYPE html><html><head><style>body{}</style></head><body><main><div>Sign in to continue</div><button>Send Verification Code</button></main><script></script></body></html>" + (" " * 900),
+                    provider="gemini",
+                    model="gemini-3-flash-preview",
+                    finish_reason="stop",
+                )
+
+        router_mod = sys.modules["app.llm.router"]
+        with mock.patch.object(router_mod, "llm_router", _StubTweakRouter()):
+            with self.assertRaises(HTTPException) as ctx:
+                await tweak_prototype(TweakPrototypeRequest(prompt="Make UI advanced"), session=session)
+
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertTrue(captured.get("prefer_quality"))
+        self.assertEqual(session.agent_outputs.get("prototype"), original)
 
 
 if __name__ == "__main__":
