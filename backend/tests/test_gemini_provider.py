@@ -42,13 +42,12 @@ class GeminiProviderTest(unittest.TestCase):
         )
 
     def test_leads_with_a_flash_model(self):
-        # gemini-3.6-flash leads: Google's recommended-stable flash, the one
-        # that reliably answers 200 not 503, checked live 2026-09-04 (the
-        # older gemini-2.5-flash now 404s "no longer available to new users").
-        # gemini-3.8-flash sits behind it as the newer backstop.
+        # Checked live 2026-11-27: gemini-3.5-flash-lite, gemini-flash-lite-latest,
+        # and gemini-3-flash-preview respond in ~1.4-2.1s without ReadTimeout.
         provider = GeminiProvider()
-        self.assertEqual(provider.candidates[0], "gemini-3.6-flash")
-        self.assertIn("gemini-3.8-flash", provider.candidates)
+        self.assertEqual(provider.candidates[0], "gemini-3.5-flash-lite")
+        self.assertIn("gemini-flash-lite-latest", provider.candidates)
+        self.assertIn("gemini-3-flash-preview", provider.candidates)
 
     def test_no_key_means_unconfigured_so_the_meeting_path_is_unchanged(self):
         # The contract that keeps adding Gemini zero-risk: with no key it

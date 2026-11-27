@@ -73,6 +73,7 @@ class OrchestratorVerdictTest(unittest.IsolatedAsyncioTestCase):
 
         fake_router = _FakeRouter(failing=failing)
         with mock.patch.object(orchestrator, "llm_router", fake_router), \
+             mock.patch.object(orchestrator.settings, "pipeline_graceful_fallback", False), \
              mock.patch.object(
                  orchestrator.stitch_service, "generate_prototype_html",
                  new=mock.AsyncMock(return_value=None),

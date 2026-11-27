@@ -51,6 +51,12 @@ def _build_requirements_block(requirements: list[dict]) -> str:
     return "\n".join(lines) if lines else "(no approved requirements yet)"
 
 
+def _trim_context(text: str, limit: int = 4500) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n... (trimmed for prompt efficiency)"
+
+
 def _build_context(agent_id: str, states: dict[str, AgentState], requirements_block: str) -> str:
     definition = AGENT_DEFINITIONS[agent_id]
 
@@ -61,7 +67,7 @@ def _build_context(agent_id: str, states: dict[str, AgentState], requirements_bl
     if agent_id == "prototype":
         # The prototype agent requires the approved requirements and the Interface Designer's screens.
         # Developer artifacts (database tables, raw API endpoints) are excluded to ensure zero technical jargon in the client UI.
-        ui_output = (states.get("ui") and states["ui"].output) or "(no UI specification)"
+        ui_output = _trim_context((states.get("ui") and states["ui"].output) or "(no UI specification)", limit=5000)
         return (
             f"Approved Client Requirements:\n{requirements_block}\n\n"
             f"--- User Interface Specification from Interface Designer ---\n{ui_output}"
@@ -71,7 +77,7 @@ def _build_context(agent_id: str, states: dict[str, AgentState], requirements_bl
     for dep_id in definition.depends_on:
         dep_state = states[dep_id]
         dep_name = AGENT_DEFINITIONS[dep_id].name
-        output = dep_state.output or "(no output)"
+        output = _trim_context(dep_state.output or "(no output)", limit=4500)
         parts.append(f"--- Output from {dep_name} ---\n{output}")
 
     return "\n\n".join(parts)
@@ -149,7 +155,7 @@ The system is structured as an **Event-Driven Distributed Microservices Architec
 - Field-level encryption for sensitive client metadata using AES-256.
 - Comprehensive audit trails logged for all administrative mutations."""
 
-    if agent_id == "db":
+    if agent_id in ("db", "database"):
         table_prefix = re.sub(r'[^a-z0-9]', '_', first_title.lower())[:15].strip('_') or "app"
         return f"""# PostgreSQL Database Architecture & Relational Schema
 
@@ -252,7 +258,10 @@ CREATE INDEX idx_{table_prefix}_logs_record_id ON {table_prefix}_activity_logs (
 1. **Persistent Global Navigation:** Brand icon mark, workspace switcher, breadcrumbs, search shortcut, and live connection status dot.
 2. **Telemetry Strip & KPI Cards:** Large tabular numerical figures with trend badges and micro-sparklines.
 3. **Primary Interactive Workspace:** Split view featuring real-time data table, responsive filter chips, and action drawer.
-4. **Modal Dialogs & Contextual Drawers:** Glassmorphic overlays with smooth cubic-bezier entry transitions."""
+4. **Modal Dialogs & Contextual Drawers:** Glassmorphic overlays with smooth cubic-bezier entry transitions.
+
+## 3. Client Feature Mapping
+{requirements_block}"""
 
     if agent_id == "backend":
         return f"""# Backend Microservices Implementation Blueprint
@@ -314,6 +323,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 async def run_pipeline(
     requirements: list[dict],
     emit: EmitFn,
+    *,
+    allow_stage_fallback: bool | None = None,
 ) -> dict[str, AgentState]:
     """
     Runs every agent to completion (or failure) in dependency order.
@@ -389,18 +400,26 @@ async def run_pipeline(
                 "output": state.output,
             })
         except Exception as e:  # noqa: BLE001
-            if agent_id == "prototype":
+            graceful = settings.pipeline_graceful_fallback if allow_stage_fallback is None else allow_stage_fallback
+            if agent_id == "prototype" or graceful:
                 logger.warning(
-                    "agent %s encountered an issue (%s), synthesizing domain prototype fallback",
+                    "agent %s encountered an issue (%s), activating requirement-driven fallback synthesis",
                     agent_id,
                     e,
                 )
                 try:
-                    fallback_out = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
-                    state.output = stitch_service.sanitize_prototype_html(fallback_out).strip()
+                    if agent_id == "prototype":
+                        fallback_out = stitch_service.sanitize_prototype_html(
+                            _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
+                        )
+                    else:
+                        fallback_out = _build_agent_fallback_output(
+                            agent_id, requirements, states, requirements_block
+                        )
+                    state.output = fallback_out.strip()
                     state.status = AgentStatus.COMPLETED
                     state.progress = 100
-                    state.logs.append("Completed via domain prototype synthesis.")
+                    state.logs.append("Completed via resilient synthesis fallback.")
                     await emit({"type": "agent_update", **state.to_event_dict()})
                     await emit({
                         "type": "agent_output",
@@ -601,7 +620,7 @@ async def _run_prototype_agent(
                     max_tokens=definition.max_tokens,
                     temperature=temperature,
                     max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
-                    reasoning_effort="low",
+                    reasoning_effort="none",
                 )
 
             html = _strip_markdown_fences(result.text.strip())

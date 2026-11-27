@@ -81,6 +81,19 @@ export default function App() {
   const [activeMeetingId, setActiveMeetingId] = useState(null);
   const [isMeetingHost, setIsMeetingHost] = useState(true);
 
+  // Keep-alive warm ping on mount & every 4 minutes so Render free-tier does not
+  // spin down mid-presentation or cause 30-50s cold-start delays.
+  useEffect(() => {
+    const ping = () => {
+      try {
+        fetch(`${API_BASE_URL}/health`, { method: "GET", keepalive: true }).catch(() => {});
+      } catch {}
+    };
+    ping();
+    const timer = setInterval(ping, 4 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Global secret shortcut (Ctrl + Shift + A) to open/toggle Admin Console
   useEffect(() => {
     const handleKeyDown = (e) => {

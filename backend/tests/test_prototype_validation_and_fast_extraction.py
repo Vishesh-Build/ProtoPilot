@@ -156,7 +156,7 @@ class PrototypeRetryPipelineTest(unittest.IsolatedAsyncioTestCase):
         proto_calls = [c for c in calls if "Prototype Builder" in c[0]]
         self.assertEqual(len(proto_calls), 2)
         self.assertGreaterEqual(proto_calls[0][1], 8192)
-        self.assertEqual(proto_calls[0][2], "low")
+        self.assertEqual(proto_calls[0][2], "none")
 
 
 class FastRealtimeFailoverTest(unittest.IsolatedAsyncioTestCase):
@@ -332,6 +332,87 @@ class FastRealtimeFailoverTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("meta/llama-3.2-11b-vision-instruct", nim.candidates)
         self.assertNotIn("google/gemma-3-12b-it", nim.candidates)
         self.assertTrue(any("nemotron" in c or "minimax" in c for c in nim.candidates))
+
+    def test_openrouter_default_candidates_use_live_free_models(self):
+        from app.llm.providers.openrouter import OpenRouterProvider
+
+        or_prov = OpenRouterProvider()
+        self.assertTrue(all(m.endswith(":free") or m == "openrouter/free" for m in or_prov.candidates))
+        self.assertNotIn("meta-llama/llama-3.3-70b-instruct:free", or_prov.candidates)
+        self.assertEqual(or_prov.candidates[0], "baidu/ernie-5.5-flash-preview:free")
+        self.assertIn("nvidia/nemotron-3.5-super-vl:free", or_prov.candidates)
+
+    async def test_openrouter_disables_reasoning_when_effort_none(self):
+        from unittest import mock
+        from app.llm.providers.openrouter import OpenRouterProvider
+        from app.llm.providers.groq import GroqProvider
+
+        seen_payloads = []
+
+        class _FakeResp:
+            status_code = 200
+            text = "{}"
+            headers = {}
+
+            def json(self):
+                return {"choices": [{"message": {"content": "<html><body>ok</body></html>"}, "finish_reason": "stop"}], "usage": {}}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                seen_payloads.append((url, dict(json or {})))
+                return _FakeResp()
+
+        or_prov = OpenRouterProvider()
+        or_prov.api_key = "test-or-key"
+        groq_prov = GroqProvider()
+        groq_prov.api_key = "test-groq-key"
+
+        with mock.patch("app.llm.providers.base.httpx.AsyncClient", _FakeClient):
+            await or_prov._post_chat([{"role": "user", "content": "hi"}], 1024, 0.2, reasoning_effort="none")
+            await groq_prov._post_chat([{"role": "user", "content": "hi"}], 1024, 0.2, reasoning_effort="none")
+
+        self.assertEqual(seen_payloads[0][1].get("reasoning"), {"enabled": False})
+        self.assertNotIn("reasoning_effort", seen_payloads[0][1])
+        self.assertEqual(seen_payloads[1][1].get("reasoning_effort"), "low")
+        self.assertNotIn("reasoning", seen_payloads[1][1])
+
+    async def test_graceful_fallback_completes_all_9_stages_when_all_ai_exhausts(self):
+        events = []
+
+        async def emit(ev):
+            events.append(ev)
+
+        class _AlwaysFailRouter:
+            async def chat(self, messages, max_tokens=None, temperature=None, max_rate_limit_wait=None, reasoning_effort=None):
+                raise RuntimeError("All LLM providers failed or are unavailable")
+
+        with mock.patch.object(orchestrator, "llm_router", _AlwaysFailRouter()), \
+             mock.patch.object(orchestrator, "_WAVE_STAGGER_SECONDS", 0), \
+             mock.patch.object(orchestrator.settings, "pipeline_graceful_fallback", True), \
+             mock.patch.object(orchestrator.stitch_service, "generate_prototype_html", new=mock.AsyncMock(return_value=None)):
+            states = await orchestrator.run_pipeline(
+                [
+                    {"title": "Mobile OTP Login", "category": "Auth", "priority": "High"},
+                    {"title": "UPI Auto-Sync Ledger", "category": "Payments", "priority": "High"},
+                ],
+                emit,
+            )
+
+        self.assertEqual(events[-1], {"type": "pipeline_complete"})
+        self.assertEqual({s.status for s in states.values()}, {AgentStatus.COMPLETED})
+        self.assertIn("CREATE TABLE", states["database"].output or "")
+        self.assertIn("Mobile OTP Login", states["ui"].output or "")
+        ok, reason = orchestrator.validate_prototype_html(states["prototype"].output or "")
+        self.assertTrue(ok, reason)
 
 
 class SecurityAndStitchSandboxTest(unittest.IsolatedAsyncioTestCase):

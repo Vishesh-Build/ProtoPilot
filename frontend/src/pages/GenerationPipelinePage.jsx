@@ -287,14 +287,22 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
     if (!meetingId) return undefined;
     let cancelled = false;
 
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+
     const connectSocket = (force = false) => {
-      if (!meetingId) return;
+      if (cancelled || !meetingId) return;
       if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
         return;
       }
 
       const socket = new WebSocket(meetingsApi.generateSocketUrl(meetingId, { force }));
       socketRef.current = socket;
+
+      socket.onopen = () => {
+        reconnectAttempts = 0;
+        setPipelineError(null);
+      };
 
       socket.onmessage = (event) => {
         let data;
@@ -327,11 +335,21 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
         }
       };
 
+      const scheduleReconnect = () => {
+        if (cancelled || finishedRef.current || isCancelled) return;
+        if (reconnectAttempts < 4) {
+          reconnectAttempts += 1;
+          reconnectTimer = setTimeout(() => connectSocket(false), 1500 * reconnectAttempts);
+        } else {
+          setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+        }
+      };
+
       socket.onerror = () => {
-        if (!finishedRef.current && !isCancelled) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+        scheduleReconnect();
       };
       socket.onclose = () => {
-        if (!finishedRef.current && !isCancelled) setPipelineError((e) => e || "Lost connection to the generation pipeline.");
+        scheduleReconnect();
       };
     };
 
@@ -372,6 +390,7 @@ export default function GenerationPipelinePage({ meetingId, intent = "view", onN
 
     return () => {
       cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socketRef.current) {
         socketRef.current.onmessage = null;
         socketRef.current.onerror = null;

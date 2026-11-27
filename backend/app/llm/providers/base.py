@@ -487,7 +487,19 @@ class OpenAICompatibleProvider:
         }
         sent_reasoning = bool(reasoning_effort and model not in self._no_reasoning_param_models)
         if sent_reasoning:
-            payload["reasoning_effort"] = reasoning_effort
+            if reasoning_effort == "none":
+                if self.name == "openrouter":
+                    payload["reasoning"] = {"enabled": False}
+                else:
+                    # Non-OpenRouter providers (e.g. Groq gpt-oss) may reject "none"
+                    # while reliably accepting "low".
+                    payload["reasoning_effort"] = "low"
+            else:
+                payload["reasoning_effort"] = reasoning_effort
+                # OpenRouter models (e.g. nemotron-*, gemma-4-*) follow OpenRouter's
+                # unified `reasoning` object rather than OpenAI's `reasoning_effort`.
+                if self.name == "openrouter":
+                    payload["reasoning"] = {"effort": reasoning_effort}
 
         effective_timeout = timeout if timeout is not None else self.timeout
         try:
@@ -504,6 +516,7 @@ class OpenAICompatibleProvider:
             if not looks_like_model_error(resp.status_code, resp.text) and not looks_like_model_capacity_error(resp.status_code, resp.text):
                 self._no_reasoning_param_models.add(model)
                 payload.pop("reasoning_effort", None)
+                payload.pop("reasoning", None)
                 try:
                     async with httpx.AsyncClient(timeout=effective_timeout) as client:
                         resp = await client.post(url, headers=self._headers(), json=payload)

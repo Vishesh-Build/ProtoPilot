@@ -98,10 +98,11 @@ export function setStoredToken(token) {
 }
 
 async function request(path, options = {}) {
-  const timeoutMs = options.timeout ?? 15000;
+  const timeoutMs = options.timeout ?? 45000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const signal = options.signal || controller.signal;
+  const method = (options.method || "GET").toUpperCase();
 
   const adminSecret =
     typeof window !== "undefined" ? sessionStorage.getItem("admin_secret") : null;
@@ -117,25 +118,64 @@ async function request(path, options = {}) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  let res;
-  try {
+  const doFetch = async (sig) => {
     const { timeout, headers: _h, ...fetchOptions } = options;
-    res = await fetch(`${API_BASE_URL}${path}`, {
+    return fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
       headers,
-      signal,
+      signal: sig,
       ...fetchOptions,
     });
+  };
+
+  let res;
+  try {
+    res = await doFetch(signal);
   } catch (err) {
-    if (err.name === "AbortError") {
-      throw new ApiError("Server request timed out — please try again.", 408);
+    clearTimeout(timeoutId);
+    // One clean automatic retry on idempotent GETs to ride through transient
+    // hotspot blips or Render free-tier wake-up handshakes.
+    if (method === "GET" && !options.signal) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const retryController = new AbortController();
+      const retryTimer = setTimeout(() => retryController.abort(), timeoutMs);
+      try {
+        res = await doFetch(retryController.signal);
+      } catch (retryErr) {
+        if (retryErr.name === "AbortError") {
+          throw new ApiError("Server request timed out — please try again.", 408);
+        }
+        throw new ApiError(
+          "Can't reach the server — check your connection and that the backend is running.",
+          0
+        );
+      } finally {
+        clearTimeout(retryTimer);
+      }
+    } else {
+      if (err.name === "AbortError") {
+        throw new ApiError("Server request timed out — please try again.", 408);
+      }
+      throw new ApiError(
+        "Can't reach the server — check your connection and that the backend is running.",
+        0
+      );
     }
-    throw new ApiError(
-      "Can't reach the server — check your connection and that the backend is running.",
-      0
-    );
   } finally {
     clearTimeout(timeoutId);
+  }
+
+  if (method === "GET" && (res.status === 502 || res.status === 503 || res.status === 504) && !options.signal) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const retryController = new AbortController();
+    const retryTimer = setTimeout(() => retryController.abort(), timeoutMs);
+    try {
+      res = await doFetch(retryController.signal);
+    } catch {
+      // Keep original response if retry failed on network
+    } finally {
+      clearTimeout(retryTimer);
+    }
   }
 
   // Access token expired mid-session: silently renew once and replay.
@@ -213,7 +253,7 @@ export const authApi = {
   },
 
   me: (arg = {}) => {
-    let opts = { timeout: 10000 };
+    let opts = { timeout: 35000 };
     if (typeof arg === "string" && arg.trim()) {
       opts.headers = { Authorization: `Bearer ${arg.trim()}` };
     } else if (typeof arg === "object" && arg) {

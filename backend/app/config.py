@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     # on 2026-11-27 — openai/gpt-oss-20b reached EOL 2026-11-18 and google/gemma-3-*
     # returns 404 "Not found for account").
     nim_models: str = (
-        "minimaxai/minimax-m3.1-flash,"
         "nvidia/nemotron-3.5-bolt-e4b,"
+        "minimaxai/minimax-m3.1-flash,"
         "nvidia/nemotron-3-ultra-550b-a55b,"
         "poolside/laguna-xs-2.1"
     )
@@ -50,8 +50,12 @@ class Settings(BaseSettings):
     # The llama-3.1-8b entry is gone because that family is the one that was
     # retired underneath us.
     openrouter_models: str = (
-        "openai/gpt-oss-20b:free,"
-        "meta-llama/llama-3.3-70b-instruct:free"
+        "baidu/ernie-5.5-flash-preview:free,"
+        "nvidia/nemotron-3.5-super-vl:free,"
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,"
+        "nvidia/nemotron-3-ultra-550b-a55b:free,"
+        "google/gemma-4-31b-it:free,"
+        "openrouter/free"
     )
 
     groq_api_key: str | None = None
@@ -87,12 +91,14 @@ class Settings(BaseSettings):
     # auth, /chat/completions and /models all work unchanged.
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
-    # gemini-3.6-flash leads (stable, high quota, answers 200 not 503), followed by gemini-3.5-flash and latest.
+    # Live-verified fast Gemini models (probed 2026-11-27): flash-lite-latest
+    # and 3.5-flash-lite answer in ~1.4-2.0s HTTP 200, avoiding the ReadTimeouts
+    # observed on gemini-3.6-flash / gemini-3.5-flash / gemini-3.7-flash.
     gemini_models: str = (
-        "gemini-3.6-flash,"
-        "gemini-3.5-flash,"
-        "gemini-flash-latest,"
-        "gemini-3.8-flash"
+        "gemini-3.5-flash-lite,"
+        "gemini-flash-lite-latest,"
+        "gemini-3.1-flash-lite-preview,"
+        "gemini-3-flash-preview"
     )
 
     # ---- Router behavior ----
@@ -120,6 +126,12 @@ class Settings(BaseSettings):
     # Strict 1 concurrency so free tier API keys (NIM, Groq) never receive
     # simultaneous requests which cause 429s or server-side read timeouts.
     llm_generation_concurrency: int = 1
+
+    # When True (default for live demos), if every AI provider exhausts on an
+    # upstream stage after all retries/rotations/rescue passes, synthesize a
+    # requirement-driven specification so the pipeline still reaches Prototype
+    # Builder instead of aborting mid-demo.
+    pipeline_graceful_fallback: bool = True
 
     # ---- Stitch (AI UI design tool) ----
     # Disabled by default so generation finishes quickly via fast LLM.
