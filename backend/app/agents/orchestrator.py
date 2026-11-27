@@ -642,12 +642,23 @@ async def _run_prototype_agent(
             user_prompt = context
             temperature = 0.35
             if attempt == 1:
+                from app.agents.design_system import resolve_design_system
+                ds_hint = resolve_design_system(f"{requirements_block}\n{context}")
+                if ds_hint["layout_mode"] == "website":
+                    layout_instruction = (
+                        "1. DO NOT start on a Login screen and DO NOT build an admin sidebar dashboard — build a complete CONSUMER WEBSITE "
+                        "(sticky top navbar + split editorial hero + category filter + 6-9 rich cards with SVG art + Quick View modal + Slide-Over Cart/Booking drawer + Footer).\n"
+                    )
+                else:
+                    layout_instruction = (
+                        "1. DO NOT start on a Login, Phone Input, or OTP screen — land directly on the full Dashboard/Workspace "
+                        "(sidebar + sticky topbar + 4 KPI cards + SVG chart with horizontal gridlines & Y/X axis labels + 6-8 populated rows + slide-over drawer).\n"
+                    )
                 user_prompt = (
                     f"{context}\n\n"
                     f"CRITICAL REPAIR INSTRUCTION: Your previous HTML draft failed quality inspection ({last_reason}). "
-                    "You MUST output a COMPLETE executive SaaS web application in ONE self-contained <!DOCTYPE html>...</html> file:\n"
-                    "1. DO NOT start on a Login, Phone Input, or OTP screen — land directly on the full Dashboard/Workspace "
-                    "(sidebar + sticky topbar + 4 KPI cards + SVG chart with horizontal gridlines & Y/X axis labels + 6-8 populated rows + slide-over drawer).\n"
+                    "You MUST output a COMPLETE interactive web application in ONE self-contained <!DOCTYPE html>...</html> file:\n"
+                    f"{layout_instruction}"
                     "2. Follow the DESIGN SYSTEM SPEC colors/theme (crisp 1px borders, no empty neon wave, no 2023/Whole Foods placeholders) and put Login/OTP in a topbar modal.\n"
                     "3. Keep <style> clean and token-based (~110-140 lines) with Light & Dark CSS variables so nothing truncates."
                 )

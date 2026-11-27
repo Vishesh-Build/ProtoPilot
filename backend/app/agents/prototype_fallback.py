@@ -15,6 +15,7 @@ import json
 import re
 
 from app.agents.design_system import DesignProfile, ThemeTokens, resolve_design_system
+from app.agents.website_template import build_website_prototype_html
 
 
 def _parse_requirements(requirements_block: str) -> list[dict[str, str]]:
@@ -84,6 +85,8 @@ def build_executive_prototype_html(
     combined_corpus = f"{pm_text}\n{ui_text}\n{requirements_block}"
 
     ds = resolve_design_system(combined_corpus, features=features)
+    if ds.get("layout_mode") == "website":
+        return build_website_prototype_html(ds, features)
     profile: DesignProfile = ds["profile"]
     owners: tuple[str, ...] = ds["owners"]
     currency = ds["currency_symbol"]

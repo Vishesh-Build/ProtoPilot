@@ -38,12 +38,30 @@ class DesignSystemResolutionTest(unittest.TestCase):
         self.assertEqual(ds_dark["mode"], "dark")
         self.assertEqual(ds_dark["tokens"].bg, "#0A0C10")
 
-    def test_commerce_uses_warm_editorial_ivory_palette(self):
-        ds = resolve_design_system("Online bakery storefront with menu cart and delivery tracking")
+    def test_commerce_uses_warm_editorial_ivory_palette_and_website_layout(self):
+        ds = resolve_design_system("Online sneaker storefront website with catalog filters, wishlist, shopping cart, and checkout")
         self.assertEqual(ds["domain"], "commerce")
+        self.assertEqual(ds["layout_mode"], "website")
         self.assertEqual(ds["mode"], "light")
         self.assertEqual(ds["tokens"].bg, "#FAF9F6")
         self.assertEqual(ds["tokens"].accent, "#C2410C")
+
+        web_html = build_executive_prototype_html(
+            states=None,
+            requirements_block=(
+                "- [High] Sneaker & Streetwear Storefront Website (Storefront)\n"
+                "- [High] Product Quick-View, Wishlist & Slide-Over Shopping Bag (Cart)\n"
+                "- [Medium] Promo Code WELCOME10 & Order Tracking (Orders)"
+            ),
+        )
+        ok, reason = orchestrator.validate_prototype_html(web_html)
+        self.assertTrue(ok, reason)
+        self.assertIsNone(orchestrator._diagnose_prototype_quality(web_html))
+        self.assertIn("Featured Catalog", web_html)
+        self.assertIn("cart-backdrop", web_html)
+        self.assertIn("WELCOME10", web_html)
+        self.assertIn("light-theme-toggle", web_html)
+        self.assertNotIn("sidebar", web_html.lower())
 
     def test_synthesized_prototype_has_real_axes_2026_dates_and_zero_slop_cliches(self):
         req_block = (

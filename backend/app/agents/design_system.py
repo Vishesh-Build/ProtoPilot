@@ -595,6 +595,25 @@ def resolve_design_system(
     is_india = any(k in low for k in ("upi", "gst", "inr", "₹", "rupee", "bhim", "razorpay", "aadhaar", "pan card", "india", "hindi", "gujarati"))
     has_auth = any(k in low for k in ("otp", "login", "auth", "sign in", "verification", "mobile number", "password", "sso", "2fa"))
 
+    website_signals = (
+        "website", "web site", "storefront", "landing page", "marketplace",
+        "e-commerce", "ecommerce", "shopping cart", "add to cart", "wishlist",
+        "product catalog", "food ordering", "food delivery", "restaurant website",
+        "hotel booking", "travel booking", "trip booking", "course platform",
+        "online store", "checkout flow", "booking website", "portfolio site",
+        "saas landing", "real estate listing", "property listing", "catalog",
+    )
+    dashboard_signals = (
+        "admin dashboard", "analytics dashboard", "telemetry", "expense tracker",
+        "kpi dashboard", "operations dashboard", "internal tool", "ledger",
+        "monitoring console",
+    )
+    has_web = any(k in low for k in website_signals)
+    has_dash_only = any(k in low for k in dashboard_signals) and not any(
+        k in low for k in ("website", "storefront", "landing page", "marketplace", "e-commerce", "ecommerce", "shopping cart")
+    )
+    layout_mode = "website" if (has_web and not has_dash_only) else "dashboard"
+
     product_name = (explicit_brand or "").strip()
     if not product_name:
         m = re.search(
@@ -617,6 +636,7 @@ def resolve_design_system(
 
     return {
         "domain": domain,
+        "layout_mode": layout_mode,
         "style_name": profile.style_name,
         "mode": mode,
         "prefer_light": mode == "light",
@@ -636,8 +656,14 @@ def build_ui_design_brief(requirements_block: str, corpus: str = "") -> str:
     p: DesignProfile = ds["profile"]
     t: ThemeTokens = ds["tokens"]
     currency_note = "₹ INR (Indian numbering e.g. ₹14,250, realistic Indian entities)" if ds["locale"] == "IN" else "$ USD (formatted e.g. $4,250.00)"
+    layout_note = (
+        "**CONSUMER WEBSITE** (Sticky Top Navbar + Split Hero with Finder/CTA + Filterable Catalog/Offer Cards Grid + Quick-View Modal + Slide-Over Cart/Booking Drawer + Pricing/Reviews + FAQ + Footer — NEVER build a sidebar admin dashboard)"
+        if ds["layout_mode"] == "website"
+        else "**OPERATIONAL WORKSPACE / DASHBOARD** (Left Navigation Rail + Sticky Topbar + 4 KPI Cards + Labeled Chart + 6-8 Populated Table Rows + Inspector Drawer)"
+    )
     return (
         "## UI/UX Pro Max Design System Recommendation\n"
+        f"- **Layout Archetype**: {layout_note}\n"
         f"- **Product Domain**: {ds['domain'].title()} | **Recommended Style**: {p.style_name}\n"
         f"- **Default Mode**: `{ds['mode'].upper()}` (provide a smooth Light/Dark switcher supporting both themes)\n"
         f"- **Palette Tokens**: bg=`{t.bg}`, surface=`{t.surface}`, elevated=`{t.elevated}`, border=`{t.border}`, "
@@ -661,15 +687,29 @@ def build_prototype_design_brief(requirements_block: str, corpus: str = "") -> s
         f"START IN `{ds['mode'].upper()}` MODE by default (match `body` class accordingly). "
         "Include a subtle Light/Dark toggle in the topbar (`<input id='light-theme-toggle'>`)."
     )
+    if ds["layout_mode"] == "website":
+        arch_rules = (
+            "- Layout Archetype: CONSUMER WEBSITE (DO NOT output a sidebar-plus-4-KPI-card admin dashboard!).\n"
+            "  Build a real multi-section consumer web app with: (1) Sticky 64px Top Navbar (logo, page nav links Home/Catalog/Compare/Orders, search bar, Light/Dark toggle, Wishlist count, interactive Cart/Booking Bag drawer trigger, Account/OTP modal trigger); "
+            "(2) Editorial Split Hero Banner (bold display headline, value prop, live search/filter bar, trust metrics, crisp bespoke SVG vector scene); "
+            "(3) Interactive Category Chips + Sort + 6-9 rich Product/Service/Listing Cards (bespoke inline SVG artwork, ratings, tags, price in tabular-nums, Quick-View modal, Wishlist heart toggle, Add to Cart/Book button); "
+            "(4) Slide-over Shopping Cart / Booking Drawer (quantity +/-, promo code e.g. WELCOME10, live subtotal/tax calculation, Express Checkout modal creating live tracked orders); "
+            "(5) Customer Testimonials / Comparison + Expandable FAQ Accordion + Clean Multi-Column Website Footer."
+        )
+    else:
+        arch_rules = (
+            "- Layout Archetype: OPERATIONAL DASHBOARD.\n"
+            "  Visual Restraint: Crisp 1px hairline borders, NO glowing neon radial background blobs, NO rainbow gradients on cards, "
+            "NO oversized empty chart boxes (keep chart height compact ~220px-250px so 6+ ledger/data rows are immediately visible below it!).\n"
+            f"  Real Chart Craft: Crisp SVG horizontal gridlines, formatted Y-axis scale ticks (e.g. {ds['currency_symbol']}0, {ds['currency_symbol']}25k), X-axis 2026 dates, subtle <= 0.14 fill opacity, hover tooltips."
+        )
+
     return (
         f"DESIGN SYSTEM SPEC ({p.style_name} — Make it look crafted by a senior human product designer, NOT an AI dark neon clone):\n"
-        f"- Domain: {ds['domain'].title()} | Brand Suggestion: {ds['product_name']} | Currency/Locale: {ds['currency_symbol']} ({ds['locale']})\n"
+        f"- Domain: {ds['domain'].title()} | Layout Mode: {ds['layout_mode'].upper()} | Brand Suggestion: {ds['product_name']} | Currency/Locale: {ds['currency_symbol']} ({ds['locale']})\n"
         f"- {mode_rule}\n"
         f"- Light Tokens: --bg:{lt.bg}; --surface:{lt.surface}; --elevated:{lt.elevated}; --border:{lt.border}; --text:{lt.text}; --muted:{lt.muted}; --accent:{lt.accent}; --accent2:{lt.accent2};\n"
         f"- Dark Tokens: --bg:{dt.bg}; --surface:{dt.surface}; --elevated:{dt.elevated}; --border:{dt.border}; --text:{dt.text}; --muted:{dt.muted}; --accent:{dt.accent}; --accent2:{dt.accent2};\n"
-        f"- Visual Restraint (Anti-AI-Slop): Crisp 1px hairline borders, NO glowing neon radial background blobs, NO rainbow gradients on cards, "
-        f"NO oversized empty chart boxes (keep chart height compact ~220px-250px so 6+ ledger/data rows are immediately visible below it!).\n"
-        f"- Real Chart Craft: Render crisp SVG horizontal gridlines, formatted Y-axis scale ticks (e.g. {ds['currency_symbol']}0, {ds['currency_symbol']}25k, {ds['currency_symbol']}50k), "
-        f"X-axis 2026 date ticks (e.g. 21 Nov .. 27 Nov), subtle fill opacity <= 0.14, data point markers, and working hover tooltips.\n"
-        f"- Authentic Content: Populate 6-8 domain-authentic rows using {', '.join(ds['owners'][:5])} and 2026 dates (ZERO 'Whole Foods Market', ZERO 'Oct 24, 2023', ZERO 'John Doe', ZERO emoji UI icons — use clean 16px hairline <svg> icons)."
+        f"{arch_rules}\n"
+        f"- Authentic Content: Populate 6-9 domain-authentic items/cards using {', '.join(ds['owners'][:5])} and 2026 dates (ZERO 'Whole Foods Market', ZERO 'Oct 24, 2023', ZERO 'John Doe', ZERO emoji UI icons — use clean 16px hairline <svg> icons)."
     )
