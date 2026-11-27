@@ -19,6 +19,8 @@ import re
 from typing import Awaitable, Callable
 
 from app.agents.definitions import AGENT_DEFINITIONS, EXECUTION_WAVES
+from app.agents.design_system import build_prototype_design_brief, build_ui_design_brief
+from app.agents.prototype_fallback import build_executive_prototype_html
 from app.agents.state import AgentState, AgentStatus
 from app.config import settings
 from app.llm.router import llm_router
@@ -65,13 +67,16 @@ def _build_context(agent_id: str, states: dict[str, AgentState], requirements_bl
         return f"Approved requirements:\n{requirements_block}"
 
     if agent_id == "prototype":
-        # The prototype agent requires the approved requirements and the Interface Designer's screens.
-        # Developer artifacts (database tables, raw API endpoints) are excluded to ensure zero technical jargon in the client UI.
-        ui_output = _trim_context((states.get("ui") and states["ui"].output) or "(no UI specification)", limit=5000)
-        return (
-            f"Approved Client Requirements:\n{requirements_block}\n\n"
-            f"--- User Interface Specification from Interface Designer ---\n{ui_output}"
-        )
+        # The prototype agent consumes product vision, approved requirements, the Interface Designer's screens,
+        # and the domain-calibrated UI/UX Pro Max design system brief (no DB/REST developer internals).
+        pm_output = _trim_context((states.get("pm") and states["pm"].output) or "", limit=1200)
+        ui_output = _trim_context((states.get("ui") and states["ui"].output) or "(no UI specification)", limit=5500)
+        design_brief = build_prototype_design_brief(requirements_block, f"{pm_output}\n{ui_output}")
+        parts = [f"Approved Client Requirements:\n{requirements_block}", design_brief]
+        if pm_output:
+            parts.append(f"--- Product Vision Summary ---\n{pm_output}")
+        parts.append(f"--- User Interface Specification from Interface Designer ---\n{ui_output}")
+        return "\n\n".join(parts)
 
     parts = []
     for dep_id in definition.depends_on:
@@ -79,6 +84,10 @@ def _build_context(agent_id: str, states: dict[str, AgentState], requirements_bl
         dep_name = AGENT_DEFINITIONS[dep_id].name
         output = _trim_context(dep_state.output or "(no output)", limit=4500)
         parts.append(f"--- Output from {dep_name} ---\n{output}")
+
+    if agent_id == "ui":
+        pm_output = (states.get("pm") and states["pm"].output) or ""
+        parts.insert(0, build_ui_design_brief(requirements_block, pm_output))
 
     return "\n\n".join(parts)
 
@@ -243,24 +252,18 @@ CREATE INDEX idx_{table_prefix}_logs_record_id ON {table_prefix}_activity_logs (
 - **Response 204 No Content**"""
 
     if agent_id == "ui":
+        brief = build_ui_design_brief(requirements_block, "")
         return f"""# User Interface & Design System Specification
 
-## 1. Design Principles & Theme
-- **Theme Paradigm:** Executive High-Fidelity Editorial SaaS (Linear / Stripe level of polish).
-- **Color Architecture:**
-  - Base Background: Deep Obsidian `#080C14` / Pure Light `#FBFBFE`
-  - Primary Accent: High-energy Mint Emerald `#00E6A8`
-  - Secondary Accent: Hyper Indigo `#4A63E8`
-  - Text: Contrast Light `#F1F5F9` / Slate `#94A3B8`
-- **Typography:** Display: `Space Grotesk`, Body: `Inter` (-0.01em letter-spacing).
+{brief}
 
-## 2. Screen Hierarchy & Component Layout
-1. **Persistent Global Navigation:** Brand icon mark, workspace switcher, breadcrumbs, search shortcut, and live connection status dot.
-2. **Telemetry Strip & KPI Cards:** Large tabular numerical figures with trend badges and micro-sparklines.
-3. **Primary Interactive Workspace:** Split view featuring real-time data table, responsive filter chips, and action drawer.
-4. **Modal Dialogs & Contextual Drawers:** Glassmorphic overlays with smooth cubic-bezier entry transitions.
+## 1. Screen Hierarchy & Component Layout
+1. **Persistent Workspace Navigation:** Brand mark, domain module links, search shortcut, and online status indicator.
+2. **KPI Strip:** 4 tabular-numerical metric cards with restrained trend pills and subtle micro-sparklines.
+3. **Interactive Telemetry & Breakdown:** Proportionally sized SVG trend chart with formatted Y-axis ticks, 2026 X-axis dates, horizontal gridlines, and hover tooltip paired with actionable insights.
+4. **Operations Workspace & Detail Drawer:** Searchable 6-8 row data table, status filter chips, + Create modal, slide-over inspector drawer, and Light/Dark toggle.
 
-## 3. Client Feature Mapping
+## 2. Client Feature Mapping
 {requirements_block}"""
 
     if agent_id == "backend":
@@ -387,6 +390,7 @@ async def run_pipeline(
                         temperature=0.3,
                         max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
                         reasoning_effort="low",
+                        prefer_quality=(agent_id == "ui"),
                     )
                 state.output = result.text.strip()
 
@@ -484,6 +488,7 @@ async def _call_router_chat(
     temperature: float,
     max_rate_limit_wait: float,
     reasoning_effort: str | None = None,
+    prefer_quality: bool = False,
 ):
     """
     Calls llm_router.chat while gracefully omitting optional parameters when
@@ -502,7 +507,18 @@ async def _call_router_chat(
     has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
     if reasoning_effort is not None and ("reasoning_effort" in params or has_varkw):
         kwargs["reasoning_effort"] = reasoning_effort
+    if prefer_quality and ("prefer_quality" in params or has_varkw):
+        kwargs["prefer_quality"] = prefer_quality
     return await llm_router.chat(**kwargs)
+
+
+def _visible_body_text(html: str) -> str:
+    """Extracts human-visible text inside <body> stripped of <script>, <style>, and HTML tags."""
+    body_match = re.search(r"<body\b[^>]*>(.*?)</body>", html, flags=re.IGNORECASE | re.DOTALL)
+    body_inner = body_match.group(1) if body_match else ""
+    body_no_assets = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", body_inner, flags=re.IGNORECASE | re.DOTALL)
+    visible = re.sub(r"<[^>]+>", " ", body_no_assets)
+    return re.sub(r"\s+", " ", visible).strip()
 
 
 def validate_prototype_html(html: str, finish_reason: str | None = None) -> tuple[bool, str]:
@@ -531,36 +547,65 @@ def validate_prototype_html(html: str, finish_reason: str | None = None) -> tupl
     if finish_reason == "length" and "</html>" not in low:
         return False, "model hit max_tokens before closing </html>"
 
-    body_match = re.search(r"<body\b[^>]*>(.*?)</body>", html, flags=re.IGNORECASE | re.DOTALL)
-    body_inner = body_match.group(1) if body_match else ""
-    body_no_assets = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", body_inner, flags=re.IGNORECASE | re.DOTALL)
-    visible_text = re.sub(r"<[^>]+>", " ", body_no_assets)
-    visible_text = re.sub(r"\s+", " ", visible_text).strip()
-    if len(visible_text) < 80:
+    if len(_visible_body_text(html)) < 80:
         return False, "prototype <body> has insufficient visible UI content"
 
     return True, ""
 
 
-def _is_low_quality_skeleton_prototype(html: str) -> bool:
+_AUTH_GATE_PHRASES = (
+    "send verification code",
+    "enter your mobile number",
+    "enter verification code",
+    "sign in to continue",
+    "login to access",
+    "verify your mobile",
+)
+
+
+def _diagnose_prototype_quality(html: str) -> str | None:
     """
-    Detects if the LLM generated a lazy wireframe with skeleton placeholders,
-    empty metric dashes, missing SVG charts, or truncated HTML instead of a rich client prototype.
+    Returns None when the prototype meets structural & executive UI density standards,
+    or a concrete rejection reason when the draft is a skeleton, sparse toy card,
+    or bare login/OTP auth wall.
     """
-    ok, _reason = validate_prototype_html(html)
+    ok, reason = validate_prototype_html(html)
     if not ok:
-        return True
-    # Empty metric dashes like >- < or >-< or > - <
-    if len(re.findall(r'>\s*-\s*<', html)) >= 2:
-        return True
+        return reason
+
+    if len(re.findall(r">\s*-\s*<", html)) >= 2:
+        return "empty '-' metric placeholders"
+
     low = html.lower()
-    if any(k in low for k in ("skeleton", "shimmer", "placeholder-bar")):
-        return True
+    if any(k in low for k in ("skeleton", "shimmer", "placeholder-bar", "lorem ipsum")):
+        return "skeleton or lorem-ipsum placeholder markup"
+
     if "mini-charts" in low and "<svg" not in low and "<canvas" not in low:
-        return True
+        return "empty chart container without rendered SVG"
+
     if "upcoming trips" in low and ("mini-charts" in low or ">-<" in html):
-        return True
-    return False
+        return "placeholder dashboard template"
+
+    vis_text = _visible_body_text(html)
+    vis_low = vis_text.lower()
+    has_rich_viz = ("<svg" in low or "<canvas" in low or "<table" in low)
+    interactive_count = low.count("<button") + low.count("nav-item") + low.count("onclick=")
+
+    # Catch bare auth-gate / phone-OTP cards masking the real product (e.g. a 1-card login screen).
+    if any(phrase in vis_low for phrase in _AUTH_GATE_PHRASES):
+        if (not has_rich_viz) or len(vis_text) < 550 or interactive_count < 3:
+            return "landing screen is a bare login/OTP gate instead of the full interactive application workspace"
+
+    # Catch ultra-thin single-card outputs lacking data visuals or table/dashboard structure.
+    if len(vis_text) < 240 or (not has_rich_viz and len(vis_text) < 420):
+        return "sparse single-card UI lacking interactive workspace components and SVG analytics"
+
+    return None
+
+
+def _is_low_quality_skeleton_prototype(html: str) -> bool:
+    """True when the prototype is incomplete, a skeleton wireframe, or a bare login-wall stub."""
+    return _diagnose_prototype_quality(html) is not None
 
 
 async def _run_prototype_agent(
@@ -574,41 +619,43 @@ async def _run_prototype_agent(
 ) -> str:
     """
     Tries Stitch first when explicitly enabled. Falls back to the LLM raw-HTML
-    path with structural/truncation checks + one automatic retry so incomplete
-    HTML (e.g. unclosed <style> causing a solid black screen) never ships.
+    path with structural/quality checks + one automatic retry so incomplete HTML
+    or bare auth-gate / toy screens never ship.
     """
     stitch_html = await stitch_service.generate_prototype_html(context)
     if stitch_html:
-        valid_stitch, _ = validate_prototype_html(stitch_html)
-        if valid_stitch:
+        stitch_issue = _diagnose_prototype_quality(stitch_html)
+        if stitch_issue is None:
             await emit({"type": "agent_log", "agent": agent_id, "message": "Generated via Google Stitch."})
             return stitch_service.sanitize_prototype_html(stitch_html)
-        logger.warning("Stitch returned incomplete HTML — continuing with AI model generation")
+        logger.warning("Stitch returned low-craft/incomplete HTML (%s) — continuing with AI model generation", stitch_issue)
 
     if settings.stitch_enabled and settings.stitch_api_key:
         await emit({"type": "agent_log", "agent": agent_id, "message": "Stitch unavailable — generating via AI model..."})
         await asyncio.sleep(0.5)
     else:
-        await emit({"type": "agent_log", "agent": agent_id, "message": "Generating interactive prototype via AI model..."})
+        await emit({"type": "agent_log", "agent": agent_id, "message": "Generating executive interactive prototype via AI model..."})
 
     last_reason = "incomplete output"
     try:
         for attempt in range(2):
             user_prompt = context
-            temperature = 0.3
+            temperature = 0.35
             if attempt == 1:
                 user_prompt = (
                     f"{context}\n\n"
-                    f"CRITICAL REPAIR INSTRUCTION: Your previous HTML draft failed validation ({last_reason}). "
-                    "Keep <style> concise (under 75 lines), avoid long CSS comments or boilerplate, and output ONE "
-                    "COMPLETE, valid <!DOCTYPE html>...<head><style>...</style></head><body>...</body></html> file "
-                    "with full interactive screens, inline SVG telemetry, tables, modals, and working JS."
+                    f"CRITICAL REPAIR INSTRUCTION: Your previous HTML draft failed quality inspection ({last_reason}). "
+                    "You MUST output a COMPLETE executive SaaS web application in ONE self-contained <!DOCTYPE html>...</html> file:\n"
+                    "1. DO NOT start on a Login, Phone Input, or OTP screen — land directly on the full Dashboard/Workspace "
+                    "(sidebar + sticky topbar + 4 KPI cards + SVG chart with horizontal gridlines & Y/X axis labels + 6-8 populated rows + slide-over drawer).\n"
+                    "2. Follow the DESIGN SYSTEM SPEC colors/theme (crisp 1px borders, no empty neon wave, no 2023/Whole Foods placeholders) and put Login/OTP in a topbar modal.\n"
+                    "3. Keep <style> clean and token-based (~110-140 lines) with Light & Dark CSS variables so nothing truncates."
                 )
-                temperature = 0.2
+                temperature = 0.25
                 await emit({
                     "type": "agent_log",
                     "agent": agent_id,
-                    "message": "Draft was incomplete or truncated — regenerating full interactive HTML...",
+                    "message": "Upgrading draft to full executive interactive dashboard layout...",
                 })
 
             async with llm_gate:
@@ -621,28 +668,29 @@ async def _run_prototype_agent(
                     temperature=temperature,
                     max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
                     reasoning_effort="none",
+                    prefer_quality=True,
                 )
 
             html = _strip_markdown_fences(result.text.strip())
             finish_reason = getattr(result, "finish_reason", None)
             valid_ok, invalid_reason = validate_prototype_html(html, finish_reason=finish_reason)
-            skeleton = _is_low_quality_skeleton_prototype(html) if valid_ok else False
+            quality_issue = _diagnose_prototype_quality(html) if valid_ok else invalid_reason
 
-            if valid_ok and not skeleton:
+            if valid_ok and quality_issue is None:
                 if "</body>" in html:
                     html = html.replace("</body>", stitch_service._CLICK_SAFETY_NET_SCRIPT + "</body>", 1)
                 else:
                     html += stitch_service._CLICK_SAFETY_NET_SCRIPT
                 return stitch_service.sanitize_prototype_html(html)
 
-            last_reason = invalid_reason if not valid_ok else "skeleton/empty placeholder markup"
+            last_reason = quality_issue or "skeleton/empty placeholder markup"
             logger.warning("Prototype attempt %d rejected (%s)", attempt + 1, last_reason)
 
-        logger.warning("Prototype LLM attempts failed validation (%s) — activating domain synthesis fallback", last_reason)
+        logger.warning("Prototype LLM attempts failed validation (%s) — activating executive domain synthesis", last_reason)
         await emit({
             "type": "agent_log",
             "agent": agent_id,
-            "message": "Synthesizing complete executive interactive prototype with live SVG telemetry...",
+            "message": "Synthesizing executive interactive workspace with live SVG telemetry...",
         })
         fallback_html = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
         return stitch_service.sanitize_prototype_html(fallback_html)
@@ -654,7 +702,7 @@ async def _run_prototype_agent(
         await emit({
             "type": "agent_log",
             "agent": agent_id,
-            "message": "Upstream LLM rate limited — synthesizing complete interactive prototype from specifications.",
+            "message": "Upstream LLM unavailable — synthesizing executive interactive prototype from specifications.",
         })
         fallback_html = _build_fallback_prototype_html(states=states, requirements_block=requirements_block)
         return stitch_service.sanitize_prototype_html(fallback_html)
@@ -665,617 +713,10 @@ def _build_fallback_prototype_html(
     requirements_block: str = "",
 ) -> str:
     """
-    Builds an award-winning, executive-grade client prototype HTML matching
-    the design standards of Google Stitch and premium modern editorial SaaS interfaces.
-    Features bold editorial typography, SVG curve analytics, live data tables, modal forms,
-    interactive tabs, and zero placeholder skeleton loaders.
+    Synthesizes an executive-grade, domain-adaptive SaaS HTML5 prototype when
+    upstream LLM providers fail or produce sparse/auth-gate stubs.
     """
-    import html as html_lib
-
-    product_name = "Enterprise Application"
-    features: list[dict[str, str]] = []
-
-    if requirements_block:
-        for line in requirements_block.splitlines():
-            line = line.strip()
-            if line.startswith("-"):
-                clean = re.sub(r"^-\s*\[(?:HIGH|MED|LOW)\]\s*", "", line)
-                cat_match = re.search(r"\(([^)]+)\)$", clean)
-                category = cat_match.group(1) if cat_match else "Core Module"
-                title = re.sub(r"\s*\([^)]+\)$", "", clean).strip()
-                if title:
-                    features.append({"title": title, "category": category})
-
-    if states and "pm" in states and states["pm"].output:
-        pm_text = states["pm"].output
-        name_match = re.search(
-            r"(?:Product|Project|System|Platform|Application)\s*Name:\s*([^\n\r]+)",
-            pm_text,
-            re.IGNORECASE,
-        )
-        if name_match:
-            cand = name_match.group(1).strip().strip("*`#")
-            if len(cand) > 2:
-                product_name = cand
-        elif features:
-            product_name = features[0]["title"]
-    elif features:
-        product_name = features[0]["title"]
-
-    if not features:
-        features = [
-            {"title": "User Authentication & Authorization", "category": "Security"},
-            {"title": "Real-time Operational Telemetry", "category": "Analytics"},
-            {"title": "Automated Workflow Engine", "category": "Automation"},
-            {"title": "Interactive Management Portal", "category": "Operations"},
-            {"title": "Notification & Alert Delivery", "category": "Communications"},
-        ]
-
-    safe_product_name = html_lib.escape(product_name)
-
-    # Dynamically build rich rows directly from customer requirements (NO hardcoding!)
-    table_rows_html = ""
-    for idx, feat in enumerate(features[:10], start=1):
-        r_id = f"REQ-{idx:02d}"
-        r_title = feat["title"]
-        r_cat = feat["category"]
-        status = "Active" if idx % 2 == 1 else "Ready"
-        status_color = "#00e6a8" if status == "Active" else "#60a5fa"
-        bg_color = "rgba(0,230,168,0.12)" if status == "Active" else "rgba(96,165,250,0.12)"
-        table_rows_html += f"""
-        <tr id="row-{r_id}">
-            <td style="padding:14px 18px; font-weight:700; color:#f8fafc; font-family:monospace; font-size:13px;">{r_id}</td>
-            <td style="padding:14px 18px; font-weight:600; color:#f1f5f9;">
-                <div>{html_lib.escape(r_title)}</div>
-                <div style="font-size:12px; color:#94a3b8; margin-top:2px; font-weight:400;">Category: {html_lib.escape(r_cat)} • Verified Module</div>
-            </td>
-            <td style="padding:14px 18px; font-size:13px; color:#cbd5e1;">Enterprise Grade</td>
-            <td style="padding:14px 18px;">
-                <span class="badge" style="background:{bg_color}; color:{status_color}; border:1px solid {status_color}; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700;">{status}</span>
-            </td>
-            <td style="padding:14px 18px; text-align:right;">
-                <button class="action-btn" onclick="toggleStatus('row-{r_id}')" style="background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; margin-right:6px;">Toggle</button>
-                <button class="action-btn" onclick="deleteRow('row-{r_id}')" style="background:#2d1a1f; color:#f87171; border:1px solid #7f1d1d; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">Delete</button>
-            </td>
-        </tr>"""
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{safe_product_name} - Executive Prototype</title>
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }}
-  body {{ background: #080c14; color: #f1f5f9; display: flex; height: 100vh; overflow: hidden; }}
-
-  /* Left Sidebar Navigation */
-  aside {{ width: 250px; background: #0c121e; border-right: 1px solid rgba(255,255,255,0.07); display: flex; flex-direction: column; flex-shrink: 0; }}
-  .brand {{ padding: 22px 20px; font-size: 16px; font-weight: 800; color: #ffffff; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 12px; letter-spacing: -0.3px; }}
-  .brand-logo {{ width: 30px; height: 30px; background: #000; border: 2px solid #00e6a8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #00e6a8; font-size: 15px; }}
-  .nav-menu {{ list-style: none; padding: 18px 12px; flex: 1; display: flex; flex-direction: column; gap: 6px; }}
-  .nav-item {{ padding: 11px 16px; border-radius: 10px; color: #94a3b8; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.15s ease; }}
-  .nav-item:hover {{ background: rgba(255,255,255,0.04); color: #ffffff; }}
-  .nav-item.active {{ background: rgba(0, 230, 168, 0.12); color: #00e6a8; font-weight: 700; border: 1px solid rgba(0, 230, 168, 0.3); }}
-
-  /* Main Container */
-  main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #080c14; }}
-  header {{ height: 68px; border-bottom: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; justify-content: space-between; padding: 0 32px; background: #0c121e; }}
-  .header-left {{ display: flex; align-items: center; gap: 24px; }}
-  .header-links {{ display: flex; align-items: center; gap: 20px; font-size: 13px; font-weight: 500; color: #94a3b8; }}
-  .header-links span:hover {{ color: #ffffff; cursor: pointer; }}
-  .header-actions {{ display: flex; align-items: center; gap: 12px; }}
-  .btn-pill {{ background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #f1f5f9; padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }}
-  .btn-pill:hover {{ background: rgba(255,255,255,0.08); border-color: #ffffff; }}
-  .btn-pill-primary {{ background: #00e6a8; color: #04140f; border: 1px solid #00e6a8; padding: 8px 20px; border-radius: 999px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; }}
-  .btn-pill-primary:hover {{ opacity: 0.9; transform: translateY(-1px); }}
-
-  /* Content area */
-  .tab-content {{ flex: 1; padding: 32px; overflow-y: auto; display: none; }}
-  .tab-content.active {{ display: block; }}
-
-  /* Reference Hero Section (Editorial Layout matching reference) */
-  .hero-card {{ background: linear-gradient(135deg, #0e1626 0%, #0c121e 100%); border: 1px solid rgba(255,255,255,0.09); border-radius: 20px; padding: 36px 40px; margin-bottom: 30px; display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 32px; align-items: center; position: relative; overflow: hidden; }}
-  .hero-tag {{ display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 16px; }}
-  .hero-tag span {{ color: #f97316; }}
-  .hero-title {{ font-size: 38px; font-weight: 900; line-height: 1.15; letter-spacing: -1px; color: #ffffff; text-transform: uppercase; margin-bottom: 18px; }}
-  .hero-highlight {{ background: #ffffff; color: #080c14; padding: 2px 8px; border-radius: 4px; display: inline-block; margin: 4px 0; }}
-  .hero-desc {{ font-size: 15px; color: #94a3b8; line-height: 1.6; margin-bottom: 24px; max-width: 440px; }}
-  .hero-cta {{ display: inline-flex; align-items: center; gap: 14px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 999px; padding: 6px 6px 6px 20px; color: #ffffff; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }}
-  .hero-cta:hover {{ background: rgba(255,255,255,0.14); border-color: #00e6a8; }}
-  .hero-cta-icon {{ width: 32px; height: 32px; background: #000; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #00e6a8; font-size: 14px; }}
-
-  /* SVG Architectural Graphic matching reference */
-  .hero-graphic {{ background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; position: relative; height: 260px; display: flex; align-items: flex-end; justify-content: center; }}
-  .svg-canvas {{ width: 100%; height: 100%; }}
-  .badge-pointer {{ position: absolute; top: 22px; right: 110px; background: #000000; color: #ffffff; border: 1px solid rgba(255,255,255,0.2); padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); }}
-
-  /* Big Metrics Row matching reference */
-  .stats-strip {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 24px; }}
-  .stat-block {{ }}
-  .stat-huge {{ font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: -0.5px; }}
-  .stat-sub {{ font-size: 13px; color: #94a3b8; font-weight: 500; margin-top: 4px; }}
-
-  /* Data Management Panel */
-  .panel {{ background: #0c121e; border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 24px; margin-bottom: 24px; }}
-  .panel-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }}
-  .panel-title {{ font-size: 18px; font-weight: 700; color: #ffffff; }}
-
-  /* Interactive Table */
-  table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }}
-  th {{ background: rgba(255,255,255,0.02); padding: 14px 18px; color: #94a3b8; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }}
-  tr {{ border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s; }}
-  tr:hover {{ background: rgba(255,255,255,0.02); }}
-
-  .search-input {{ background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 9px 16px; color: #ffffff; font-size: 13px; width: 280px; outline: none; }}
-  .search-input:focus {{ border-color: #00e6a8; }}
-
-  /* Modal Form */
-  .modal-backdrop {{ position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(6px); }}
-  .modal-backdrop.open {{ display: flex; }}
-  .modal-box {{ background: #0c121e; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; width: 480px; padding: 28px; box-shadow: 0 25px 50px rgba(0,0,0,0.7); }}
-  .modal-title {{ font-size: 18px; font-weight: 800; color: #ffffff; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }}
-  .modal-close {{ background: transparent; border: none; color: #94a3b8; font-size: 24px; cursor: pointer; }}
-  .form-group {{ margin-bottom: 16px; }}
-  .form-label {{ display: block; font-size: 12px; font-weight: 700; color: #94a3b8; margin-bottom: 8px; text-transform: uppercase; }}
-  .form-input {{ width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 14px; color: #ffffff; font-size: 14px; outline: none; }}
-  .form-input:focus {{ border-color: #00e6a8; }}
-
-  /* Settings toggles */
-  .toggle-row {{ display: flex; align-items: center; justify-content: space-between; padding: 18px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }}
-  .toggle-title {{ font-weight: 600; font-size: 14px; color: #f1f5f9; }}
-  .toggle-desc {{ font-size: 12px; color: #94a3b8; margin-top: 3px; }}
-  .switch {{ position: relative; display: inline-block; width: 48px; height: 26px; }}
-  .switch input {{ opacity: 0; width: 0; height: 0; }}
-  .slider {{ position: absolute; cursor: pointer; inset: 0; background-color: #334155; transition: .2s; border-radius: 26px; }}
-  .slider:before {{ position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .2s; border-radius: 50%; }}
-  input:checked + .slider {{ background-color: #00e6a8; }}
-  input:checked + .slider:before {{ transform: translateX(22px); }}
-
-  /* Light theme override when user asks for light theme or toggles in Settings */
-  body.light-theme {{ background: #f4f7fb; color: #0f172a; }}
-  body.light-theme aside, body.light-theme header, body.light-theme .panel, body.light-theme .modal-box, body.light-theme .toast {{ background: #ffffff; color: #0f172a; border-color: rgba(15,23,42,0.1); }}
-  body.light-theme main {{ background: #f4f7fb; }}
-  body.light-theme .hero-card {{ background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%); border-color: rgba(15,23,42,0.1); }}
-  body.light-theme .hero-title, body.light-theme .stat-huge, body.light-theme .panel-title, body.light-theme .modal-title, body.light-theme .toggle-title, body.light-theme .brand {{ color: #0f172a; }}
-  body.light-theme .hero-highlight {{ background: #0f172a; color: #ffffff; }}
-  body.light-theme .hero-desc, body.light-theme .stat-sub, body.light-theme .nav-item, body.light-theme .header-links, body.light-theme .toggle-desc, body.light-theme th {{ color: #475569; }}
-  body.light-theme td, body.light-theme .search-input, body.light-theme .form-input {{ color: #0f172a !important; }}
-  body.light-theme .search-input, body.light-theme .form-input {{ background: #f8fafc; border-color: #cbd5e1; }}
-  body.light-theme .btn-pill {{ color: #0f172a; border-color: #cbd5e1; }}
-
-  /* Toast notification */
-  .toast-container {{ position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 9999; pointer-events: none; }}
-  .toast {{ background: #0c121e; border-left: 4px solid #00e6a8; border: 1px solid rgba(255,255,255,0.1); color: #ffffff; padding: 14px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; box-shadow: 0 15px 35px rgba(0,0,0,0.5); animation: slideIn 0.25s ease-out; }}
-  @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
-</style>
-</head>
-<body>
-  <!-- Sidebar -->
-  <aside>
-    <div class="brand">
-      <div class="brand-logo">●</div>
-      <span>{safe_product_name}</span>
-    </div>
-    <ul class="nav-menu">
-      <li class="nav-item active" onclick="switchTab('dashboard')"><span>✦</span> Overview</li>
-      <li class="nav-item" onclick="switchTab('workspace')"><span>📋</span> Workflows & Data</li>
-      <li class="nav-item" onclick="switchTab('analytics')"><span>📈</span> Analytics</li>
-      <li class="nav-item" onclick="switchTab('settings')"><span>⚙️</span> Settings</li>
-    </ul>
-  </aside>
-
-  <!-- Main -->
-  <main>
-    <header>
-      <div class="header-left">
-        <div class="header-links">
-          <span onclick="switchTab('dashboard')">Overview</span>
-          <span>•</span>
-          <span onclick="switchTab('workspace')">Workflows</span>
-          <span>•</span>
-          <span onclick="switchTab('analytics')">Metrics</span>
-          <span>•</span>
-          <span onclick="showToast('Workspace Plan Active')">Plan Active</span>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button class="btn-pill" onclick="toggleTheme()" id="theme-quick-btn">◐ Theme</button>
-        <button class="btn-pill-primary" onclick="openModal()">+ New Item</button>
-      </div>
-    </header>
-
-    <!-- Tab 1: Executive Dashboard (Hero & Architectural Graphic) -->
-    <div id="tab-dashboard" class="tab-content active">
-      <div class="hero-card">
-        <div>
-          <div class="hero-tag"><span>✦</span> Interactive Workspace Prototype</div>
-          <h1 class="hero-title">
-            BUILT FOR<br>
-            <span class="hero-highlight">MODERN</span><br>
-            {safe_product_name.upper()}
-          </h1>
-          <p class="hero-desc">
-            Interactive workflow prototype tailored to the captured meeting requirements, featuring live record management, telemetry charts, and user controls.
-          </p>
-          <div class="hero-cta" onclick="switchTab('workspace')">
-            <span>Explore Workflows & Records</span>
-            <div class="hero-cta-icon">➔</div>
-          </div>
-        </div>
-
-        <!-- Rendered SVG Architectural Graphic (Matches uploaded reference image) -->
-        <div class="hero-graphic">
-          <svg class="svg-canvas" viewBox="0 0 460 240" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="pillar1" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#FED7AA" stop-opacity="0.85" />
-                <stop offset="100%" stop-color="#FDBA74" stop-opacity="0.3" />
-              </linearGradient>
-              <linearGradient id="pillar2" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#E9D5FF" stop-opacity="0.85" />
-                <stop offset="100%" stop-color="#C084FC" stop-opacity="0.3" />
-              </linearGradient>
-              <linearGradient id="pillar3" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#BBF7D0" stop-opacity="0.85" />
-                <stop offset="100%" stop-color="#86EFAC" stop-opacity="0.3" />
-              </linearGradient>
-            </defs>
-
-            <!-- Three Architectural Columns with rounded tops -->
-            <rect x="70" y="80" width="100" height="150" rx="4" fill="url(#pillar1)" stroke="#FB923C" stroke-width="1.5" />
-            <rect x="180" y="50" width="100" height="180" rx="4" fill="url(#pillar2)" stroke="#A855F7" stroke-width="1.5" />
-            <rect x="290" y="25" width="100" height="205" rx="4" fill="url(#pillar3)" stroke="#22C55E" stroke-width="1.5" />
-
-            <!-- Upward Curving Trend Path -->
-            <path d="M 20 180 C 120 170, 200 45, 380 25" stroke="#00E6A8" stroke-width="3.5" fill="none" stroke-linecap="round" />
-            <circle cx="380" cy="25" r="5" fill="#00E6A8" stroke="#000" stroke-width="2" />
-            
-            <!-- Connection ticks -->
-            <line x1="120" y1="80" x2="120" y2="135" stroke="rgba(255,255,255,0.4)" stroke-dasharray="3 3" />
-            <line x1="230" y1="50" x2="230" y2="85" stroke="rgba(255,255,255,0.4)" stroke-dasharray="3 3" />
-            <line x1="340" y1="25" x2="340" y2="38" stroke="rgba(255,255,255,0.4)" stroke-dasharray="3 3" />
-          </svg>
-          <div class="badge-pointer">
-            <span>● Average 98.4% Efficiency</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bottom 4 Statistics Strip -->
-      <div class="stats-strip">
-        <div class="stat-block">
-          <div class="stat-huge" id="stat-main">{len(features)}</div>
-          <div class="stat-sub">Configured Modules</div>
-        </div>
-        <div class="stat-block">
-          <div class="stat-huge">99.2%</div>
-          <div class="stat-sub">Service Reliability</div>
-        </div>
-        <div class="stat-block">
-          <div class="stat-huge">1,280+</div>
-          <div class="stat-sub">Active Daily Actions</div>
-        </div>
-        <div class="stat-block">
-          <div class="stat-huge">+18.4%</div>
-          <div class="stat-sub">Efficiency Gain</div>
-        </div>
-      </div>
-
-      <!-- Quick Feature Showcase -->
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">Core Product Capabilities</span>
-          <button class="btn-pill" onclick="switchTab('workspace')">Manage All Records →</button>
-        </div>
-        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
-          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:18px; border-radius:12px;">
-            <div style="font-weight:700; color:#00e6a8; font-size:14px; margin-bottom:6px;">✓ Real-Time Updates</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Instant state synchronization, responsive feedback, and reliable user workflows.</div>
-          </div>
-          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:18px; border-radius:12px;">
-            <div style="font-weight:700; color:#60a5fa; font-size:14px; margin-bottom:6px;">✓ Smart Automation</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Automated rule evaluation, filtering, and actionable status transitions.</div>
-          </div>
-          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:18px; border-radius:12px;">
-            <div style="font-weight:700; color:#a78bfa; font-size:14px; margin-bottom:6px;">✓ Access & Control</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.5;">Verification flows, configurable preferences, and clear activity visibility.</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 2: Operations & Data Records (Interactive Management Table) -->
-    <div id="tab-workspace" class="tab-content">
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">Captured Modules & Records</span>
-          <div style="display:flex; gap:12px;">
-            <input type="text" class="search-input" id="table-search" placeholder="Search title or category..." oninput="filterTable()">
-            <button class="btn-pill-primary" onclick="openModal()">+ Add Item</button>
-          </div>
-        </div>
-        <div style="overflow-x:auto;">
-          <table id="main-table">
-            <thead>
-              <tr>
-                <th style="width:120px;">Item ID</th>
-                <th>Module & Feature</th>
-                <th>Scope</th>
-                <th>Status</th>
-                <th style="text-align:right;">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="table-body">
-              {table_rows_html}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 3: Telemetry & Analytics -->
-    <div id="tab-analytics" class="tab-content">
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">Performance & Activity Analytics</span>
-          <button class="btn-pill" onclick="showToast('Metrics refreshed')">↻ Refresh Metrics</button>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
-          <div>
-            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Workflow Completion Rate</div>
-            <div style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden; margin-bottom:20px;">
-              <div style="background:#00e6a8; width:96.4%; height:100%;"></div>
-            </div>
-
-            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Active Engagement Index</div>
-            <div style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden; margin-bottom:20px;">
-              <div style="background:#38bdf8; width:91.8%; height:100%;"></div>
-            </div>
-
-            <div style="font-size:13px; color:#94a3b8; font-weight:600; margin-bottom:8px;">Quality & Compliance Score</div>
-            <div style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden;">
-              <div style="background:#a855f7; width:98.7%; height:100%;"></div>
-            </div>
-          </div>
-
-          <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:20px;">
-            <div style="font-size:14px; font-weight:700; color:#ffffff; margin-bottom:12px;">Live System Summary</div>
-            <div style="font-size:13px; color:#94a3b8; line-height:1.7;">
-              <div>• {len(features)} core modules active in workspace</div>
-              <div>• Average response time: 22ms across workflows</div>
-              <div>• Theme preference switchable in Settings</div>
-              <div>• Zero blocking errors in simulated flows</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 4: Settings -->
-    <div id="tab-settings" class="tab-content">
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">System & Portal Preferences</span>
-          <button class="btn-pill-primary" onclick="showToast('Preferences updated!')">Save Settings</button>
-        </div>
-        <div class="toggle-row">
-          <div>
-            <div class="toggle-title">Light Theme Mode</div>
-            <div class="toggle-desc">Switch between light surface theme and dark workspace theme</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="light-theme-toggle" {"checked" if "light" in requirements_block.lower() else ""} onchange="setTheme(this.checked)"><span class="slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <div>
-            <div class="toggle-title">Real-Time Auto Sync</div>
-            <div class="toggle-desc">Automatically synchronize updates and records across views</div>
-          </div>
-          <label class="switch"><input type="checkbox" checked onchange="showToast('Auto sync preference saved')"><span class="slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <div>
-            <div class="toggle-title">Instant Notifications</div>
-            <div class="toggle-desc">Show alerts for key actions, verifications, and status changes</div>
-          </div>
-          <label class="switch"><input type="checkbox" checked onchange="showToast('Notification preference saved')"><span class="slider"></span></label>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- Add Record Modal -->
-  <div class="modal-backdrop" id="modal" onclick="if(event.target===this) closeModal()">
-    <div class="modal-box">
-      <div class="modal-title">
-        <span>Add New Record</span>
-        <button class="modal-close" onclick="closeModal()">&times;</button>
-      </div>
-      <form onsubmit="handleFormSubmit(event)">
-        <div class="form-group">
-          <label class="form-label">Feature / Item Name</label>
-          <input type="text" class="form-input" id="item-route" placeholder="e.g. Custom Export Rule" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Category</label>
-          <input type="text" class="form-input" id="item-asset" placeholder="e.g. Core Module" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Owner / Scope</label>
-          <input type="text" class="form-input" id="item-lead" placeholder="e.g. Workspace Team" required>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
-          <button type="button" class="btn-pill" onclick="closeModal()">Cancel</button>
-          <button type="submit" class="btn-pill-primary">Create Item</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Toast Notification Container -->
-  <div class="toast-container" id="toast-container"></div>
-
-  <script>
-    function switchTab(tabId) {{
-      document.querySelectorAll('.tab-content').forEach(function(el) {{ el.classList.remove('active'); }});
-      document.querySelectorAll('.nav-item').forEach(function(el) {{ el.classList.remove('active'); }});
-      var target = document.getElementById('tab-' + tabId);
-      if (target) target.classList.add('active');
-      var items = document.querySelectorAll('.nav-item');
-      if (tabId === 'dashboard') items[0].classList.add('active');
-      else if (tabId === 'workspace') items[1].classList.add('active');
-      else if (tabId === 'analytics') items[2].classList.add('active');
-      else if (tabId === 'settings') items[3].classList.add('active');
-    }}
-
-    function showToast(msg) {{
-      var container = document.getElementById('toast-container');
-      var toast = document.createElement('div');
-      toast.className = 'toast';
-      toast.textContent = msg;
-      container.appendChild(toast);
-      setTimeout(function() {{
-        toast.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(10px)';
-        setTimeout(function() {{ toast.remove(); }}, 300);
-      }}, 3000);
-    }}
-
-    function openModal() {{
-      document.getElementById('modal').classList.add('open');
-      document.getElementById('item-route').focus();
-    }}
-
-    function closeModal() {{
-      document.getElementById('modal').classList.remove('open');
-    }}
-
-    function handleFormSubmit(e) {{
-      e.preventDefault();
-      var titleVal = document.getElementById('item-route').value.trim();
-      var catVal = document.getElementById('item-asset').value.trim();
-      var scopeVal = document.getElementById('item-lead').value.trim();
-      if (!titleVal) return;
-      var tbody = document.getElementById('table-body');
-      var num = tbody.children.length + 1;
-      var id = 'REQ-' + (num < 10 ? '0' + num : num);
-      var row = document.createElement('tr');
-      row.id = 'row-' + id;
-
-      var tdId = document.createElement('td');
-      tdId.style.cssText = 'padding:14px 18px; font-weight:700; color:#f8fafc; font-family:monospace; font-size:13px;';
-      tdId.textContent = id;
-
-      var tdTitle = document.createElement('td');
-      tdTitle.style.cssText = 'padding:14px 18px; font-weight:600; color:#f1f5f9;';
-      var divMain = document.createElement('div');
-      divMain.textContent = titleVal;
-      var divSub = document.createElement('div');
-      divSub.style.cssText = 'font-size:12px; color:#94a3b8; margin-top:2px; font-weight:400;';
-      divSub.textContent = 'Category: ' + catVal + ' • Verified Module';
-      tdTitle.appendChild(divMain);
-      tdTitle.appendChild(divSub);
-
-      var tdScope = document.createElement('td');
-      tdScope.style.cssText = 'padding:14px 18px; font-size:13px; color:#cbd5e1;';
-      tdScope.textContent = scopeVal || 'Enterprise Grade';
-
-      var tdBadge = document.createElement('td');
-      tdBadge.style.cssText = 'padding:14px 18px;';
-      var badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.style.cssText = 'background:rgba(0,230,168,0.12); color:#00e6a8; border:1px solid #00e6a8; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:700;';
-      badge.textContent = 'Active';
-      tdBadge.appendChild(badge);
-
-      var tdActions = document.createElement('td');
-      tdActions.style.cssText = 'padding:14px 18px; text-align:right;';
-      var btnToggle = document.createElement('button');
-      btnToggle.className = 'action-btn';
-      btnToggle.style.cssText = 'background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; margin-right:6px;';
-      btnToggle.textContent = 'Toggle';
-      btnToggle.onclick = function() {{ toggleStatus('row-' + id); }};
-      var btnDelete = document.createElement('button');
-      btnDelete.className = 'action-btn';
-      btnDelete.style.cssText = 'background:#2d1a1f; color:#f87171; border:1px solid #7f1d1d; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;';
-      btnDelete.textContent = 'Delete';
-      btnDelete.onclick = function() {{ deleteRow('row-' + id); }};
-      tdActions.appendChild(btnToggle);
-      tdActions.appendChild(btnDelete);
-
-      row.appendChild(tdId);
-      row.appendChild(tdTitle);
-      row.appendChild(tdScope);
-      row.appendChild(tdBadge);
-      row.appendChild(tdActions);
-      tbody.insertBefore(row, tbody.firstChild);
-      closeModal();
-      document.getElementById('item-route').value = '';
-      document.getElementById('item-asset').value = '';
-      document.getElementById('item-lead').value = '';
-      showToast('Record ' + id + ' added successfully!');
-    }}
-
-    function toggleStatus(rowId) {{
-      var row = document.getElementById(rowId);
-      if (!row) return;
-      var badge = row.querySelector('.badge');
-      if (badge) {{
-        if (badge.textContent === 'Active') {{
-          badge.textContent = 'Ready';
-          badge.style.color = '#60a5fa';
-          badge.style.borderColor = '#60a5fa';
-          badge.style.background = 'rgba(96,165,250,0.12)';
-          showToast('Item marked as Ready');
-        }} else {{
-          badge.textContent = 'Active';
-          badge.style.color = '#00e6a8';
-          badge.style.borderColor = '#00e6a8';
-          badge.style.background = 'rgba(0,230,168,0.12)';
-          showToast('Item status updated to Active');
-        }}
-      }}
-    }}
-
-    function deleteRow(rowId) {{
-      var row = document.getElementById(rowId);
-      if (!row) return;
-      row.style.transition = 'opacity 0.25s, transform 0.25s';
-      row.style.opacity = '0';
-      row.style.transform = 'scale(0.95)';
-      setTimeout(function() {{ row.remove(); showToast('Item deleted'); }}, 250);
-    }}
-
-    function setTheme(isLight) {{
-      document.body.classList.toggle('light-theme', Boolean(isLight));
-      var chk = document.getElementById('light-theme-toggle');
-      if (chk) chk.checked = Boolean(isLight);
-      showToast(isLight ? 'Switched to Light Theme' : 'Switched to Dark Theme');
-    }}
-
-    function toggleTheme() {{
-      setTheme(!document.body.classList.contains('light-theme'));
-    }}
-
-    (function initThemeFromRequirements() {{
-      var chk = document.getElementById('light-theme-toggle');
-      if (chk && chk.checked) {{
-        document.body.classList.add('light-theme');
-      }}
-    }})();
-
-    function filterTable() {{
-      var q = (document.getElementById('table-search').value || '').toLowerCase();
-      var rows = document.querySelectorAll('#table-body tr');
-      rows.forEach(function(r) {{
-        var text = r.textContent.toLowerCase();
-        r.style.display = text.indexOf(q) !== -1 ? '' : 'none';
-      }});
-    }}
-  </script>
-</body>
-</html>"""
+    html = build_executive_prototype_html(states=states, requirements_block=requirements_block)
     if "</body>" in html:
         html = html.replace("</body>", stitch_service._CLICK_SAFETY_NET_SCRIPT + "</body>", 1)
     else:

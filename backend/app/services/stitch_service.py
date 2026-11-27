@@ -214,35 +214,27 @@ def sanitize_prototype_html(html: str) -> str:
 def _build_stitch_prompt(context: str) -> str:
     """
     Turns the approved requirements and UI spec into a design brief Stitch
-    can work from, plus the product's default style direction.
+    can work from, powered by the UI/UX Pro Max design system recommendation.
     """
+    from app.agents.design_system import build_prototype_design_brief
+
+    design_spec = build_prototype_design_brief(context)
     return (
-        "Design a premium, modern, production-level SaaS product UI based on "
-        "the following client product specifications and screens:\n\n"
+        "Design a human-crafted, editorial SaaS product UI (Stripe / Mercury / Linear / Notion polish — NOT a dark neon AI template) "
+        "based on the following client product specifications and design system:\n\n"
+        f"{design_spec}\n\n"
         f"{context}\n\n"
-        "CRITICAL CLIENT PRESENTATION RULES (ZERO DEVELOPER JARGON):\n"
-        "- This is an executive/client-facing prototype. NEVER display database schema names "
-        "(e.g. 'RELATIONAL SCHEMA:', 'Schema:'), SQL tables, or backend API endpoints "
-        "(e.g. 'POST /...', 'GET /...', '/api/v1/...') on any screen, card, form, or button.\n"
-        "- NEVER include developer debug tabs (no 'API Specs & JWT', no debug terminals).\n"
-        "- All forms, buttons, cards, and tables must have clean, human-friendly business labels "
-        "(e.g. 'Service Details', 'Pricing Plan', 'Banner Media', 'Save Changes').\n"
-        "- All user feedback and toasts must be natural end-user messages (e.g. 'Saved successfully', 'Created new service'), "
-        "NEVER debug messages like 'Invoked endpoint mock: POST ...'.\n\n"
-        "Style direction: minimal, futuristic, premium, clean, responsive, "
-        "with subtle glassmorphism on cards/panels, smooth transitions, "
-        "modern typography, rounded cards, and excellent spacing/whitespace. "
-        "The layout must be fully responsive — use fluid widths, flexbox/"
-        "grid, and sensible breakpoints so it looks correct on both "
-        "desktop and mobile viewports, not just one fixed width. "
-        f"Default look: {settings.stitch_style_direction}\n\n"
-        "Invent a plausible product name — no placeholder branding, no lorem ipsum.\n\n"
-        "Interactivity: every button, tab, icon, toggle, and form on the "
-        "screen must have working inline JS so clicking it visibly does "
-        "something — switch a tab, open/close a panel, update a number or "
-        "list on the page with sample data, show a brief confirmation, etc. "
-        "There is no real backend, so fake it with plain JS and sample data, "
-        "but nothing should be a dead click with no visible response."
+        "CRITICAL CLIENT PRESENTATION & ANTI-AUTH-GATE RULES:\n"
+        "- NEVER lock Screen 1 behind a standalone Login, Phone Input, or OTP gate! The landing screen MUST "
+        "immediately showcase the complete interactive application workspace (Sidebar, Top Header, 4 KPI Cards "
+        "with trend deltas, labeled SVG charts with formatted Y/X axes, and 6-8 populated domain rows). Put any Login/OTP "
+        "inside a modal triggered from a topbar badge.\n"
+        "- ZERO DEVELOPER JARGON: NEVER display database schema names (e.g. 'RELATIONAL SCHEMA:', 'Schema:'), SQL tables, "
+        "or backend API endpoints (e.g. 'POST /...', 'GET /...', '/api/v1/...') on any screen, card, form, or button.\n"
+        "- NEVER output 'Oct 24, 2023', 'Whole Foods Market', 'John Doe', empty '-' metrics, or generic placeholders.\n"
+        "- All user feedback must be crisp in-app toasts (NEVER browser alert()).\n\n"
+        "Interactivity: every sidebar nav item, filter chip, timeframe switch, table row, modal CTA, and light/dark toggle "
+        "must work via inline JS (in-memory state only — no localStorage/fetch) with real DOM updates."
     )
 
 
@@ -258,7 +250,7 @@ _CLICK_SAFETY_NET_SCRIPT = """
 <script>
 (function () {
   function alreadyHandled(el) {
-    if (el.hasAttribute('onclick')) return true;
+    if (el.hasAttribute('onclick') || typeof el.onclick === 'function') return true;
     if (el.tagName === 'A' && el.getAttribute('href') && el.getAttribute('href') !== '#') return true;
     if (el.tagName === 'BUTTON' && el.type === 'submit') return true;
     return false;

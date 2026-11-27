@@ -339,6 +339,12 @@ export const meetingsApi = {
       timeout: 45000,
     }),
 
+  undoPrototype: (meetingId, previousHtml = null) =>
+    request(`/meetings/${meetingId}/undo-prototype`, {
+      method: "POST",
+      body: JSON.stringify(previousHtml ? { previous_html: previousHtml } : {}),
+    }),
+
   publicPrototypeUrl: (meetingId) => `${API_BASE_URL}/p/${meetingId}`,
 
   list: () => request("/meetings"),

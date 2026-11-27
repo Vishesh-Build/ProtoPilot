@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   Radio, LayoutDashboard, Users, Cpu, GitBranch, Eye,
   Monitor, Tablet, Smartphone,
-  RefreshCw, ExternalLink, ChevronRight,
+  RefreshCw, ExternalLink, ChevronRight, RotateCcw,
   Layers, Clock, Sparkles, Copy, Check, Link2, AlertCircle, Download, Loader2,
   Maximize2, Minimize2, Share2, Send, FileCode, CheckCircle2,
 } from "lucide-react";
@@ -442,7 +442,12 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
   const [tweakPrompt, setTweakPrompt] = useState("");
   const [isTweaking, setIsTweaking] = useState(false);
   const [tweakSuccess, setTweakSuccess] = useState(false);
+  const [tweakMessage, setTweakMessage] = useState("Prototype updated live with AI refinement!");
   const [tweakError, setTweakError] = useState(null);
+  const [undoStack, setUndoStack] = useState([]);
+  const [backendCanUndo, setBackendCanUndo] = useState(false);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -464,10 +469,15 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
     }
     let cancelled = false;
 
+    setUndoStack([]);
+    setBackendCanUndo(false);
+    setTweakError(null);
+    setTweakSuccess(false);
     meetingsApi.agentOutputs(meetingId)
       .then((data) => {
         if (cancelled) return;
         const outputs = data.agent_outputs || {};
+        setBackendCanUndo(Boolean(data.can_undo));
         if (outputs.prototype) {
           setPrototypeHtml(outputs.prototype);
           if (isIncompletePrototypeHtml(outputs.prototype)) {
@@ -568,18 +578,27 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
     URL.revokeObjectURL(url);
   };
 
+  const canUndo = undoStack.length > 0 || backendCanUndo;
+
   const handleTweak = async (e) => {
     e?.preventDefault();
     const prompt = tweakPrompt.trim();
-    if (!prompt || isTweaking || !meetingId) return;
+    if (!prompt || isTweaking || isUndoing || !meetingId) return;
     setIsTweaking(true);
     setTweakError(null);
     setTweakSuccess(false);
+    const snapshot = prototypeHtml;
     try {
       const res = await meetingsApi.tweakPrototype(meetingId, prompt);
       if (res && res.prototype) {
+        if (snapshot) {
+          setUndoStack((prev) => [...prev.slice(-4), snapshot]);
+        }
+        setBackendCanUndo(Boolean(res.can_undo ?? true));
         setPrototypeHtml(res.prototype);
+        setIframeKey((k) => k + 1);
         setTweakPrompt("");
+        setTweakMessage("Prototype updated! You can click Undo anytime to restore the previous version.");
         setTweakSuccess(true);
         setTimeout(() => setTweakSuccess(false), 3500);
       } else {
@@ -589,6 +608,39 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
       setTweakError(err.message || "Failed to tweak prototype");
     } finally {
       setIsTweaking(false);
+    }
+  };
+
+  const handleUndo = async () => {
+    if (!canUndo || isUndoing || isTweaking || !meetingId) return;
+    setIsUndoing(true);
+    setTweakError(null);
+    setTweakSuccess(false);
+    const localPrev = undoStack.length > 0 ? undoStack[undoStack.length - 1] : null;
+    try {
+      const res = await meetingsApi.undoPrototype(meetingId, localPrev);
+      if (res && res.prototype) {
+        setUndoStack((prev) => prev.slice(0, -1));
+        setBackendCanUndo(Boolean(res.can_undo));
+        setPrototypeHtml(res.prototype);
+        setIframeKey((k) => k + 1);
+        setTweakMessage("Restored previous prototype version!");
+        setTweakSuccess(true);
+        setTimeout(() => setTweakSuccess(false), 3500);
+      }
+    } catch (err) {
+      if (localPrev) {
+        setUndoStack((prev) => prev.slice(0, -1));
+        setPrototypeHtml(localPrev);
+        setIframeKey((k) => k + 1);
+        setTweakMessage("Restored previous local checkpoint.");
+        setTweakSuccess(true);
+        setTimeout(() => setTweakSuccess(false), 3500);
+      } else {
+        setTweakError(err.message || "Nothing left to undo");
+      }
+    } finally {
+      setIsUndoing(false);
     }
   };
 
@@ -635,7 +687,19 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
             </div>
             {status === "ready" && (
               <>
-                <div className="pv-tool-btn" title="Reload" onClick={() => window.location.reload()}><RefreshCw size={13} /></div>
+                <div className="pv-tool-btn" title="Reload preview" onClick={() => setIframeKey((k) => k + 1)}><RefreshCw size={13} /></div>
+                {canUndo && (
+                  <button
+                    type="button"
+                    className="pv-tool-btn"
+                    title="Undo last tweak or regeneration and restore previous version"
+                    onClick={handleUndo}
+                    disabled={isUndoing || isTweaking}
+                  >
+                    {isUndoing ? <Loader2 size={13} className="pv-spin" /> : <RotateCcw size={13} />}
+                    Undo
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`pv-tool-btn ${copiedLink ? "primary" : ""}`}
@@ -696,7 +760,7 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
                       reach the parent DOM, our cookies and localStorage, or just
                       strip its own sandbox attribute. Scripts and forms are all a
                       clickable prototype needs; the origin stays opaque. */}
-                  <iframe title="Generated prototype" srcDoc={prototypeHtml} sandbox="allow-scripts allow-forms" />
+                  <iframe key={iframeKey} title="Generated prototype" srcDoc={prototypeHtml} sandbox="allow-scripts allow-forms" />
                 </div>
               </div>
             )}
@@ -712,15 +776,28 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
                   <input
                     type="text"
                     className="pv-tweak-input"
-                    placeholder="Ask AI to tweak this prototype (e.g. 'Add a dark mode toggle', 'Add pricing table', 'Make hero bigger')..."
+                    placeholder="Ask AI to tweak this prototype (e.g. 'Switch to light mode', 'Add GST invoice table', 'Make chart weekly')..."
                     value={tweakPrompt}
                     onChange={(e) => setTweakPrompt(e.target.value)}
-                    disabled={isTweaking}
+                    disabled={isTweaking || isUndoing}
                   />
+                  {canUndo && (
+                    <button
+                      type="button"
+                      className="pv-tool-btn"
+                      style={{ borderRadius: 999, padding: "7px 13px" }}
+                      title="Restore previous prototype version"
+                      onClick={handleUndo}
+                      disabled={isUndoing || isTweaking}
+                    >
+                      {isUndoing ? <Loader2 size={13} className="pv-spin" /> : <RotateCcw size={13} />}
+                      <span>Undo</span>
+                    </button>
+                  )}
                   <button
                     type="submit"
                     className="pv-tweak-btn"
-                    disabled={!tweakPrompt.trim() || isTweaking}
+                    disabled={!tweakPrompt.trim() || isTweaking || isUndoing}
                   >
                     {isTweaking ? (
                       <>
@@ -738,7 +815,7 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
               </form>
               {tweakSuccess && (
                 <div className="pv-tweak-toast success">
-                  <CheckCircle2 size={13} /> Prototype updated live with AI refinement!
+                  <CheckCircle2 size={13} /> {tweakMessage}
                 </div>
               )}
               {tweakError && (
@@ -904,6 +981,7 @@ export default function PrototypeViewerPage({ meetingId, onOpenPipeline, onNavig
               )}
               <div className="pv-device-screen" style={{ width: "100%", height: "100%" }}>
                 <iframe
+                  key={`fs-${iframeKey}`}
                   title="Generated prototype fullscreen"
                   srcDoc={prototypeHtml}
                   sandbox="allow-scripts allow-forms"

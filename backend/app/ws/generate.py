@@ -240,9 +240,11 @@ async def generate_socket(websocket: WebSocket, meeting_id: str):
     async def pipeline_worker():
         try:
             final_states = await run_pipeline(approved, active.emit)
-            session.replace_agent_outputs(
-                {agent_id: state.output for agent_id, state in final_states.items() if state.output}
-            )
+            prev_proto = session.agent_outputs.get("prototype")
+            new_outputs = {agent_id: state.output for agent_id, state in final_states.items() if state.output}
+            if prev_proto and new_outputs.get("prototype") and new_outputs["prototype"] != prev_proto:
+                session.push_prototype_snapshot(prev_proto)
+            session.replace_agent_outputs(new_outputs)
         except asyncio.CancelledError:
             logger.info("meeting %s: pipeline worker cancelled", meeting_id)
             await active.emit({

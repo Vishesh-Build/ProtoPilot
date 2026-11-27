@@ -81,6 +81,8 @@ class MeetingSession:
     requirements: list[Requirement] = field(default_factory=list)
     # Filled in after the agent pipeline runs — agent_id -> its output text.
     agent_outputs: dict = field(default_factory=dict)
+    # In-session undo checkpoints stored before prototype tweaks / regenerations.
+    prototype_history: list[str] = field(default_factory=list, repr=False)
 
     # Waiting Room / Host Approval
     approved_user_ids: set[str] = field(default_factory=set)
@@ -262,6 +264,22 @@ class MeetingSession:
         self.agent_outputs = dict(outputs)
         if self._store is not None:
             self._store.replace_agent_outputs(self.meeting_id, self.agent_outputs)
+
+    def push_prototype_snapshot(self, html: str | None, max_history: int = 5) -> None:
+        """Saves the current prototype HTML onto the in-session undo stack before overwriting."""
+        if not html or not html.strip():
+            return
+        if self.prototype_history and self.prototype_history[-1] == html:
+            return
+        self.prototype_history.append(html)
+        if len(self.prototype_history) > max_history:
+            self.prototype_history = self.prototype_history[-max_history:]
+
+    def pop_prototype_snapshot(self) -> str | None:
+        """Pops and returns the most recent backed-up prototype HTML, if any."""
+        if not self.prototype_history:
+            return None
+        return self.prototype_history.pop()
 
     def update_requirement_status(self, requirement_id: int, status_value: str) -> "Requirement | None":
         """Accept/reject a requirement (host-only at the API layer). Returns

@@ -54,7 +54,10 @@ async def get_meeting(meeting_id: str, current_user: User = Depends(get_current_
 
 @router.get("/{meeting_id}/agent-outputs")
 async def get_agent_outputs(session: MeetingSession = Depends(require_meeting_participant)):
-    return {"agent_outputs": session.agent_outputs}
+    return {
+        "agent_outputs": session.agent_outputs,
+        "can_undo": bool(session.prototype_history),
+    }
 
 
 @router.get("/{meeting_id}/transcript")
@@ -251,6 +254,10 @@ class TweakPrototypeRequest(BaseModel):
     prompt: str
 
 
+class UndoPrototypeRequest(BaseModel):
+    previous_html: str | None = None
+
+
 @router.post("/{meeting_id}/tweak-prototype")
 async def tweak_prototype(
     body: TweakPrototypeRequest,
@@ -258,9 +265,12 @@ async def tweak_prototype(
 ):
     """
     AI Quick-Tweak: Iteratively refines the existing prototype HTML using a prompt
-    (e.g., 'Switch theme to dark mode', 'Add pricing comparison table'). Host only.
+    (e.g., 'Switch theme to light mode', 'Add pricing comparison table'). Host only.
+    Automatically checkpoints the current HTML so the host can Undo cleanly.
     """
-    from app.agents.orchestrator import validate_prototype_html
+    from app.agents.design_system import build_prototype_design_brief
+    from app.agents.orchestrator import validate_prototype_html, _is_low_quality_skeleton_prototype
+    from app.config import settings
     from app.llm.router import llm_router
 
     prompt_text = body.prompt.strip()
@@ -275,15 +285,19 @@ async def tweak_prototype(
             detail="No prototype has been generated for this meeting yet. Generate one first before tweaking."
         )
 
+    design_spec = build_prototype_design_brief(f"{prompt_text}\n{current_html[:2000]}")
     system_prompt = (
-        "You are an expert Senior Frontend UX Engineer and rapid prototyping master. "
-        "You are given an existing single-file interactive HTML prototype (which includes inline CSS and interactive JS). "
-        "The user wants to make a specific modification or addition to this prototype: "
-        f"\"{prompt_text}\". "
-        "Apply the requested change directly into the prototype HTML, carefully preserving all other existing styling, features, and interactivity. "
-        "STRICT CLIENT PRESENTATION RULE: This is an end-user client prototype. NEVER add database schema names, SQL tables, REST API paths (like POST /...), or developer debug toasts. All user feedback must be clean, natural product UI messages. "
-        "Return ONLY the complete revised executable HTML document starting with <!DOCTYPE html> and ending with </html>. "
-        "Do NOT include markdown code blocks, backticks, or any conversational explanation before or after the code."
+        "You are a Principal Frontend UI/UX Architect applying the UI/UX Pro Max design system. "
+        "You are given an existing single-file interactive HTML5 prototype (inline CSS, SVG, and vanilla JS). "
+        f"Apply the user's modification request cleanly and thoroughly: \"{prompt_text}\".\n"
+        f"{design_spec}\n"
+        "QUALITY & PRESERVATION RULES:\n"
+        "1. Elevate human-crafted editorial SaaS polish: token-based Light/Dark CSS variables, responsive desktop + mobile "
+        "shell, crisp 1px borders, tabular numbers, labeled inline SVG charts with gridlines, working modals/drawers, and in-app toasts (NO alert()).\n"
+        "2. NEVER collapse the workspace into a bare login/OTP card or grey skeleton placeholders, and NEVER break existing working interactive tabs, search, or forms.\n"
+        "3. Client-safe copy only: NEVER output SQL tables, schema names, REST paths (POST /..., /api/...), 'Oct 24, 2023', or 'Whole Foods Market'.\n"
+        "4. Self-contained sandbox hygiene: inline CSS/SVG/JS only; NO localStorage, sessionStorage, fetch, or external CDNs.\n"
+        "5. Return ONLY the complete revised executable HTML document starting with <!DOCTYPE html> and ending with </html> (no ``` markdown fences, no commentary)."
     )
 
     user_prompt = f"User Request: {prompt_text}\n\nExisting Prototype HTML:\n```html\n{current_html}\n```"
@@ -293,7 +307,14 @@ async def tweak_prototype(
     ]
 
     try:
-        result = await llm_router.chat(messages, max_tokens=8192, reasoning_effort="low")
+        result = await llm_router.chat(
+            messages,
+            max_tokens=16384,
+            temperature=0.35,
+            max_rate_limit_wait=settings.llm_generation_max_rate_limit_wait,
+            reasoning_effort="none",
+            prefer_quality=True,
+        )
         raw_output = result.text.strip()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI refinement failed: {str(e)}")
@@ -311,13 +332,22 @@ async def tweak_prototype(
     from app.services.stitch_service import sanitize_prototype_html
     cleaned_html = sanitize_prototype_html(cleaned_html)
 
-    valid_ok, invalid_reason = validate_prototype_html(cleaned_html, finish_reason=result.finish_reason)
+    valid_ok, invalid_reason = validate_prototype_html(
+        cleaned_html,
+        finish_reason=getattr(result, "finish_reason", None),
+    )
     if not valid_ok:
         raise HTTPException(
             status_code=502,
             detail=f"AI refinement returned incomplete HTML ({invalid_reason}); original prototype was preserved.",
         )
+    if _is_low_quality_skeleton_prototype(cleaned_html):
+        raise HTTPException(
+            status_code=502,
+            detail="AI refinement downgraded the UI into a minimal stub; original prototype was preserved.",
+        )
 
+    session.push_prototype_snapshot(current_html)
     session.agent_outputs["prototype"] = cleaned_html
     session.replace_agent_outputs(session.agent_outputs)
 
@@ -328,6 +358,51 @@ async def tweak_prototype(
         "prototype": cleaned_html,
     })
 
-    return {"prototype": cleaned_html, "status": "success"}
+    return {
+        "prototype": cleaned_html,
+        "status": "success",
+        "can_undo": bool(session.prototype_history),
+    }
+
+
+@router.post("/{meeting_id}/undo-prototype")
+async def undo_prototype(
+    body: UndoPrototypeRequest | None = None,
+    session: MeetingSession = Depends(require_meeting_host),
+):
+    """
+    Restores the immediately preceding prototype HTML checkpoint after a tweak
+    or regeneration. Host only.
+    """
+    from app.agents.orchestrator import validate_prototype_html
+    from app.services.stitch_service import sanitize_prototype_html
+
+    restored = session.pop_prototype_snapshot()
+    if restored is None and body and body.previous_html:
+        candidate = sanitize_prototype_html(body.previous_html.strip())
+        valid_ok, _ = validate_prototype_html(candidate)
+        if valid_ok:
+            restored = candidate
+
+    if not restored:
+        raise HTTPException(
+            status_code=400,
+            detail="No previous prototype checkpoint available to restore.",
+        )
+
+    session.agent_outputs["prototype"] = restored
+    session.replace_agent_outputs(session.agent_outputs)
+
+    from app.core.connection_manager import meeting_connections
+    await meeting_connections.broadcast(session.meeting_id, {
+        "type": "prototype_tweaked",
+        "prototype": restored,
+    })
+
+    return {
+        "prototype": restored,
+        "status": "restored",
+        "can_undo": bool(session.prototype_history),
+    }
 
 
